@@ -1,0 +1,2517 @@
+GAS LISTING /tmp/ccO1TY4U.s 			page 1
+
+
+   1              		.file	"targets.c"
+   2              		.text
+   3              	.Ltext0:
+   5              	path_equal:
+   6              	.LFB5:
+   7              		.file 1 "targets.c"
+   1:targets.c     **** #include <stdarg.h>
+   2:targets.c     **** #include "targets.h"
+   3:targets.c     **** #include "crypto.h"
+   4:targets.c     **** #include "uptane_config.h"
+   5:targets.c     **** #include "sha512.h"
+   6:targets.c     **** #include "gjson.h"
+   7:targets.c     **** 
+   8:targets.c     **** 
+   9:targets.c     **** typedef enum {
+  10:targets.c     **** 	STATE_INIT,
+  11:targets.c     **** 	STATE_OBJECT,
+  12:targets.c     **** 	STATE_VALUE,
+  13:targets.c     **** } targets_state_t;
+  14:targets.c     **** 
+  15:targets.c     **** typedef enum {
+  16:targets.c     **** 	KEY_SIGNATURES = 0,
+  17:targets.c     **** 	KEY_KEYID,
+  18:targets.c     **** 	KEY_METHOD,
+  19:targets.c     **** 	KEY_SIG,
+  20:targets.c     **** 	KEY_SIGNED,
+  21:targets.c     **** 	KEY_TYPE,
+  22:targets.c     **** 	KEY_EXPIRES,
+  23:targets.c     **** 	KEY_TARGETS,
+  24:targets.c     **** 	KEY_CUSTOM,
+  25:targets.c     **** 	KEY_ECU_IDENTIFIER,
+  26:targets.c     **** 	KEY_HARDWARE_IDENTIFIER,
+  27:targets.c     **** 	KEY_RELEASE_COUNTER,
+  28:targets.c     **** 	KEY_HASHES,
+  29:targets.c     **** 	KEY_SHA256,
+  30:targets.c     **** 	KEY_SHA512,
+  31:targets.c     **** 	KEY_LENGTH,
+  32:targets.c     **** 	KEY_VERSION,
+  33:targets.c     **** 	KEY_ANY,
+  34:targets.c     **** 	KEY_ARRAY,
+  35:targets.c     **** 	KEY_NUMBER, // dummy value to get the total number of possible keys
+  36:targets.c     **** } targets_key_t;
+  37:targets.c     **** 
+  38:targets.c     **** // The order should be the same as in targets_key_t
+  39:targets.c     **** static const char* targets_key_strings[] = {"signatures", "keyid", "method", "sig",
+  40:targets.c     **** 					    "signed", "_type", "expires", "targets",
+  41:targets.c     **** 					    "custom", "ecu_identifier", "hardware_identifier",
+  42:targets.c     **** 					    "release_counter", "hashes", "sha256", "sha512",
+  43:targets.c     **** 					    "length", "version", "*", "["};
+  44:targets.c     **** 
+  45:targets.c     **** struct targets_ctx {
+  46:targets.c     **** 	/* Inputs */
+  47:targets.c     **** 	int version_prev;
+  48:targets.c     **** 	uint32_t time;
+  49:targets.c     **** 	crypto_key_and_signature_t* sigs[CONFIG_UPTANE_TARGETS_MAX_SIGS]; 
+  50:targets.c     **** 	int num_keys;
+  51:targets.c     **** 	int threshold;
+GAS LISTING /tmp/ccO1TY4U.s 			page 2
+
+
+  52:targets.c     **** 	uint8_t* ecu_id;
+  53:targets.c     **** 	uint8_t* hardware_id;
+  54:targets.c     **** 
+  55:targets.c     **** 	/* Outputs */
+  56:targets.c     **** 	uint8_t sha512_hash[SHA512_HASH_SIZE]; /* Only one hash is currently supported*/
+  57:targets.c     **** 	int version;
+  58:targets.c     **** 	int length;
+  59:targets.c     **** 	targets_result_t res;
+  60:targets.c     **** 
+  61:targets.c     **** 	/* Intermediate state */
+  62:targets.c     **** 	/* Intermediate state - Overall */
+  63:targets.c     **** 	gj_context_t* json_ctx;
+  64:targets.c     **** 	targets_state_t state;
+  65:targets.c     **** 
+  66:targets.c     **** 	/* TODO: Consider merging boolean flags into bitmasks */
+  67:targets.c     **** 	bool version_checked;
+  68:targets.c     **** 	bool time_checked;
+  69:targets.c     **** 	bool signatures_checked;
+  70:targets.c     **** 	bool got_image;
+  71:targets.c     **** 	targets_key_t path[CONFIG_UPTANE_TARGETS_MAX_NESTEDNESS];
+  72:targets.c     **** 	int path_ind;
+  73:targets.c     **** 
+  74:targets.c     **** 	/* Intermediate state - Signatures */
+  75:targets.c     **** 	bool got_sig_keyid;
+  76:targets.c     **** 	bool got_sig_method;
+  77:targets.c     **** 	bool got_sig_sig;
+  78:targets.c     **** 	bool sig_ignore;
+  79:targets.c     **** 	int current_sig;
+  80:targets.c     **** 	int sigs_found;
+  81:targets.c     **** 	bool sigvalid[CONFIG_UPTANE_TARGETS_MAX_SIGS];
+  82:targets.c     **** 	/* Intermediate state - Signed */
+  83:targets.c     **** 	bool ecuid_matches;
+  84:targets.c     **** 	bool hardwareid_matches;
+  85:targets.c     **** 	/* Intermediate state - Target */
+  86:targets.c     **** 	bool hash_found;
+  87:targets.c     **** 	bool length_found;
+  88:targets.c     **** 	/* Intermediate state - Signature check */
+  89:targets.c     **** 	crypto_verify_ctx_t* sig_ctxs[CONFIG_UPTANE_TARGETS_MAX_SIGS];
+  90:targets.c     **** 	bool in_signed;
+  91:targets.c     **** };
+  92:targets.c     **** 
+  93:targets.c     **** #ifdef CONFIG_UPTANE_NOMALLOC
+  94:targets.c     **** static targets_ctx_t targets_ctxs[CONFIG_UPTANE_TARGETS_NUM_CONTEXTS];
+  95:targets.c     **** static bool targets_ctx_busy[CONFIG_UPTANE_TARGETS_NUM_CONTEXTS] = {0, }; //could be reduce to a bi
+  96:targets.c     **** #endif
+  97:targets.c     **** 
+  98:targets.c     **** targets_ctx_t* targets_ctx_new() {
+  99:targets.c     **** #ifdef CONFIG_UPTANE_NOMALLOC
+ 100:targets.c     **** 	int i;
+ 101:targets.c     **** 
+ 102:targets.c     **** 	for(i = 0; i < CONFIG_UPTANE_TARGETS_NUM_CONTEXTS; i++)
+ 103:targets.c     **** 		if(!targets_ctx_busy[i])
+ 104:targets.c     **** 			return &targets_ctxs[i];
+ 105:targets.c     **** 	return NULL;
+ 106:targets.c     **** #else
+ 107:targets.c     **** 	return malloc(sizeof(targets_ctx_t));
+ 108:targets.c     **** 
+GAS LISTING /tmp/ccO1TY4U.s 			page 3
+
+
+ 109:targets.c     **** #endif
+ 110:targets.c     **** }
+ 111:targets.c     **** 
+ 112:targets.c     **** void targets_ctx_free(targets_ctx_t* ctx) {
+ 113:targets.c     **** 	int i;
+ 114:targets.c     **** #ifdef CONFIG_UPTANE_NOMALLOC
+ 115:targets.c     **** 	uintptr_t j = ((uintptr_t) ctx - (uintptr_t) targets_ctxs)/sizeof(targets_ctx_t); 
+ 116:targets.c     **** #endif
+ 117:targets.c     **** 
+ 118:targets.c     **** 	gj_ctx_free(ctx->json_ctx);
+ 119:targets.c     **** 
+ 120:targets.c     **** 	for(i = 0; i < ctx->num_keys; i++)
+ 121:targets.c     **** 		if(ctx->sigvalid[i])
+ 122:targets.c     **** 			crypto_verify_ctx_free(ctx->sig_ctxs[i]);
+ 123:targets.c     **** 
+ 124:targets.c     **** #ifdef CONFIG_UPTANE_NOMALLOC
+ 125:targets.c     **** 	targets_ctx_busy[j] = 0;
+ 126:targets.c     **** #else
+ 127:targets.c     **** 	free(ctx);
+ 128:targets.c     **** #endif
+ 129:targets.c     **** }
+ 130:targets.c     **** 
+ 131:targets.c     **** /* Compare two json "paths". Variadic part contains keys terminated with
+ 132:targets.c     ****  * KEY_NUMBER. E.g. path_equal(path. len, KEY_SIGNATURES, KEY_KEYID, KEY_NUMBER) */
+ 133:targets.c     **** static bool path_equal(const targets_key_t* path, int len, ...) {
+   8              		.loc 1 133 0
+   9              		.cfi_startproc
+  10              	.LVL0:
+ 134:targets.c     **** 	va_list args;
+ 135:targets.c     **** 	va_start(args, len);
+  11              		.loc 1 135 0
+  12 0000 488D4424 		leaq	8(%rsp), %rax
+  12      08
+ 133:targets.c     **** 	va_list args;
+  13              		.loc 1 133 0
+  14 0005 48895424 		movq	%rdx, -32(%rsp)
+  14      E0
+  15 000a 488D5424 		leaq	8(%rsp), %rdx
+  15      08
+  16 000f 48894C24 		movq	%rcx, -24(%rsp)
+  16      E8
+  17 0014 4C894C24 		movq	%r9, -8(%rsp)
+  17      F8
+ 136:targets.c     **** 	targets_key_t key;
+ 137:targets.c     **** 	int i;
+ 138:targets.c     **** 
+ 139:targets.c     **** 	for(i = 0; i < len; i++) {
+  18              		.loc 1 139 0
+  19 0019 31C9     		xorl	%ecx, %ecx
+ 135:targets.c     **** 	targets_key_t key;
+  20              		.loc 1 135 0
+  21 001b 48894424 		movq	%rax, -64(%rsp)
+  21      C0
+  22 0020 488D4424 		leaq	-48(%rsp), %rax
+  22      D0
+ 133:targets.c     **** 	va_list args;
+  23              		.loc 1 133 0
+GAS LISTING /tmp/ccO1TY4U.s 			page 4
+
+
+  24 0025 4C894424 		movq	%r8, -16(%rsp)
+  24      F0
+ 135:targets.c     **** 	targets_key_t key;
+  25              		.loc 1 135 0
+  26 002a C74424B8 		movl	$16, -72(%rsp)
+  26      10000000 
+  27              		.loc 1 139 0
+  28 0032 4531C9   		xorl	%r9d, %r9d
+  29 0035 4531D2   		xorl	%r10d, %r10d
+ 135:targets.c     **** 	targets_key_t key;
+  30              		.loc 1 135 0
+  31 0038 48894424 		movq	%rax, -56(%rsp)
+  31      C8
+  32              	.LVL1:
+  33 003d B8100000 		movl	$16, %eax
+  33      00
+  34              	.LVL2:
+  35              	.L2:
+  36              		.loc 1 139 0 discriminator 1
+  37 0042 39CE     		cmpl	%ecx, %esi
+  38 0044 7E40     		jle	.L19
+ 140:targets.c     **** 		key = va_arg(args, targets_key_t);
+  39              		.loc 1 140 0
+  40 0046 83F82F   		cmpl	$47, %eax
+  41 0049 7713     		ja	.L3
+  42 004b 4C8D5C24 		leaq	-48(%rsp), %r11
+  42      D0
+  43 0050 4189C0   		movl	%eax, %r8d
+  44 0053 41B201   		movb	$1, %r10b
+  45 0056 83C008   		addl	$8, %eax
+  46 0059 4D01D8   		addq	%r11, %r8
+  47 005c EB0A     		jmp	.L4
+  48              	.L3:
+  49 005e 4989D0   		movq	%rdx, %r8
+  50 0061 41B101   		movb	$1, %r9b
+  51 0064 4883C208 		addq	$8, %rdx
+  52              	.L4:
+  53 0068 458B00   		movl	(%r8), %r8d
+ 141:targets.c     **** 		if(path[i] != key && key != KEY_ANY)
+  54              		.loc 1 141 0
+  55 006b 4439048F 		cmpl	%r8d, (%rdi,%rcx,4)
+  56 006f 410F95C3 		setne	%r11b
+  57 0073 4183F811 		cmpl	$17, %r8d
+  58 0077 410F95C0 		setne	%r8b
+  59 007b 48FFC1   		incq	%rcx
+  60              	.LVL3:
+  61 007e 4584C3   		testb	%r8b, %r11b
+  62 0081 74BF     		je	.L2
+ 142:targets.c     **** 			return false;
+  63              		.loc 1 142 0
+  64 0083 31C0     		xorl	%eax, %eax
+ 143:targets.c     **** 	}
+ 144:targets.c     **** 
+ 145:targets.c     **** 	return (va_arg(args, targets_key_t) == KEY_NUMBER);
+ 146:targets.c     **** }
+  65              		.loc 1 146 0
+  66 0085 C3       		ret
+GAS LISTING /tmp/ccO1TY4U.s 			page 5
+
+
+  67              	.LVL4:
+  68              	.L19:
+  69 0086 4584D2   		testb	%r10b, %r10b
+  70 0089 7404     		je	.L7
+  71 008b 894424B8 		movl	%eax, -72(%rsp)
+  72              	.L7:
+  73 008f 4584C9   		testb	%r9b, %r9b
+  74 0092 7405     		je	.L8
+  75 0094 48895424 		movq	%rdx, -64(%rsp)
+  75      C0
+  76              	.L8:
+ 145:targets.c     **** }
+  77              		.loc 1 145 0
+  78 0099 8B4424B8 		movl	-72(%rsp), %eax
+  79 009d 83F82F   		cmpl	$47, %eax
+  80 00a0 770A     		ja	.L9
+  81 00a2 488D7424 		leaq	-48(%rsp), %rsi
+  81      D0
+  82              	.LVL5:
+  83 00a7 4801F0   		addq	%rsi, %rax
+  84 00aa EB05     		jmp	.L10
+  85              	.LVL6:
+  86              	.L9:
+  87 00ac 488B4424 		movq	-64(%rsp), %rax
+  87      C0
+  88              	.LVL7:
+  89              	.L10:
+  90 00b1 833813   		cmpl	$19, (%rax)
+  91 00b4 0F94C0   		sete	%al
+  92 00b7 C3       		ret
+  93              		.cfi_endproc
+  94              	.LFE5:
+  96              		.section	.rodata.str1.1,"aMS",@progbits,1
+  97              	.LC0:
+  98 0000 54617267 		.string	"Targets"
+  98      65747300 
+  99              		.text
+ 101              	targets_json_handler:
+ 102              	.LFB10:
+ 147:targets.c     **** 
+ 148:targets.c     **** /* Process signatures.keyid field, updating the context */
+ 149:targets.c     **** static bool process_keyid(targets_ctx_t* ctx, const uint8_t* data) {
+ 150:targets.c     **** 	size_t len;
+ 151:targets.c     **** 	int i;
+ 152:targets.c     **** 	uint8_t keyid[CRYPTO_KEYID_LEN];
+ 153:targets.c     **** 
+ 154:targets.c     **** 	if(ctx->sig_ignore)
+ 155:targets.c     **** 		return true;
+ 156:targets.c     **** 
+ 157:targets.c     **** 	len = strnlen(data, 2*CRYPTO_KEYID_LEN);
+ 158:targets.c     **** 	if(len != 2*CRYPTO_KEYID_LEN)
+ 159:targets.c     **** 		return false;
+ 160:targets.c     **** 
+ 161:targets.c     **** 	for(i = 0; i < CRYPTO_KEYID_LEN; i++)
+ 162:targets.c     **** 		keyid[i] = hex(data[i << 1], data[1+ (i << i)]);
+ 163:targets.c     **** 
+ 164:targets.c     **** 	ctx->sig_ignore = true;
+GAS LISTING /tmp/ccO1TY4U.s 			page 6
+
+
+ 165:targets.c     **** 	for(i = 0; i < ctx->num_keys; i++)
+ 166:targets.c     **** 		if(!memcmp(ctx->sigs[i]->key->keyid, keyid, CRYPTO_KEYID_LEN)) {
+ 167:targets.c     **** 			ctx->current_sig = i;
+ 168:targets.c     **** 			ctx->sig_ignore = false;
+ 169:targets.c     **** 			break;
+ 170:targets.c     **** 		}
+ 171:targets.c     **** 	ctx->got_sig_keyid = true;
+ 172:targets.c     **** 	return true;
+ 173:targets.c     **** }
+ 174:targets.c     **** 
+ 175:targets.c     **** /* Process signatures.method field, updating the context */
+ 176:targets.c     **** static bool process_method(targets_ctx_t* ctx, const uint8_t* data) {
+ 177:targets.c     **** 	ctx->sig_ignore = ctx->sig_ignore || crypto_keytype_supported(data);
+ 178:targets.c     **** 	ctx->got_sig_method = true;
+ 179:targets.c     **** 	return true;
+ 180:targets.c     **** }
+ 181:targets.c     **** 
+ 182:targets.c     **** /* Process signatures.sig field, updating the context */
+ 183:targets.c     **** static bool process_sig(targets_ctx_t* ctx, const uint8_t* data) {
+ 184:targets.c     **** 	int len;
+ 185:targets.c     **** 	int i;
+ 186:targets.c     **** 	crypto_key_and_signature_t* s;
+ 187:targets.c     **** 
+ 188:targets.c     **** 	if(ctx->sig_ignore)
+ 189:targets.c     **** 		return true;
+ 190:targets.c     **** 
+ 191:targets.c     **** 	/* current_sig is set when key_id is encountered, we depend on it */
+ 192:targets.c     **** 	if(!ctx->got_sig_keyid)
+ 193:targets.c     **** 		return false;
+ 194:targets.c     **** 
+ 195:targets.c     **** 	len = strlen(data);
+ 196:targets.c     **** 	if(len != 2*CRYPTO_SIGNATURE_LEN)
+ 197:targets.c     **** 		return false;
+ 198:targets.c     **** 
+ 199:targets.c     **** 	s = ctx->sigs[ctx->current_sig];
+ 200:targets.c     **** 	for(i = 0; i < CRYPTO_SIGNATURE_LEN; i++)
+ 201:targets.c     **** 		s->sig[i] = hex(data[i << 1], data[1+ (i << i)]);
+ 202:targets.c     **** 
+ 203:targets.c     **** 	ctx->got_sig_sig = true;
+ 204:targets.c     **** 	return true;
+ 205:targets.c     **** }
+ 206:targets.c     **** 
+ 207:targets.c     **** static targets_result_t checkresult(targets_ctx_t* ctx) {
+ 208:targets.c     **** 	if(!ctx->version_checked)
+ 209:targets.c     **** 		return TARGETS_NOVERSION;
+ 210:targets.c     **** 	if(!ctx->time_checked)
+ 211:targets.c     **** 		return TARGETS_NOTIME;
+ 212:targets.c     **** 	if(!ctx->signatures_checked)
+ 213:targets.c     **** 		return TARGETS_NOSIGS;
+ 214:targets.c     **** 	if(ctx->sigs_found < ctx->threshold)
+ 215:targets.c     **** 		return TARGETS_LOWSIGS;
+ 216:targets.c     **** 	if(!ctx->got_image) {
+ 217:targets.c     **** 		if(!ctx->hash_found)
+ 218:targets.c     **** 			return TARGETS_NOHASH;
+ 219:targets.c     **** 		if(!ctx->length_found)
+ 220:targets.c     **** 			return TARGETS_NOLENGTH;
+ 221:targets.c     **** 		return TARGETS_OK_NOIMAGE;
+GAS LISTING /tmp/ccO1TY4U.s 			page 7
+
+
+ 222:targets.c     **** 	}
+ 223:targets.c     **** 	if(ctx->version == ctx->version_prev)
+ 224:targets.c     **** 		return TARGETS_OK_NOUPDATE;
+ 225:targets.c     **** 	return TARGETS_OK_UPDATE;
+ 226:targets.c     **** }
+ 227:targets.c     **** 
+ 228:targets.c     **** static bool targets_json_handler(gj_event_t ev, const uint8_t* data, void* priv) {
+ 103              		.loc 1 228 0
+ 104              		.cfi_startproc
+ 105              	.LVL8:
+ 106 00b8 4157     		pushq	%r15
+ 107              		.cfi_def_cfa_offset 16
+ 108              		.cfi_offset 15, -16
+ 109 00ba 4156     		pushq	%r14
+ 110              		.cfi_def_cfa_offset 24
+ 111              		.cfi_offset 14, -24
+ 112 00bc 4989D6   		movq	%rdx, %r14
+ 113 00bf 4155     		pushq	%r13
+ 114              		.cfi_def_cfa_offset 32
+ 115              		.cfi_offset 13, -32
+ 116 00c1 4154     		pushq	%r12
+ 117              		.cfi_def_cfa_offset 40
+ 118              		.cfi_offset 12, -40
+ 119 00c3 55       		pushq	%rbp
+ 120              		.cfi_def_cfa_offset 48
+ 121              		.cfi_offset 6, -48
+ 122 00c4 53       		pushq	%rbx
+ 123              		.cfi_def_cfa_offset 56
+ 124              		.cfi_offset 3, -56
+ 125 00c5 4883EC48 		subq	$72, %rsp
+ 126              		.cfi_def_cfa_offset 128
+ 229:targets.c     **** 	targets_ctx_t* ctx = (targets_ctx_t*) priv;
+ 230:targets.c     **** 
+ 231:targets.c     **** 	if(ev == GJ_EVENT_ERR) {
+ 127              		.loc 1 231 0
+ 128 00c9 83FFFF   		cmpl	$-1, %edi
+ 129 00cc 0F841709 		je	.L71
+ 129      0000
+ 232:targets.c     **** 		ctx->res = TARGETS_JSONERR;
+ 233:targets.c     **** 		return true;
+ 234:targets.c     **** 	}
+ 235:targets.c     **** 
+ 236:targets.c     **** 	if(ev == GJ_EVENT_CHAR) {
+ 130              		.loc 1 236 0
+ 131 00d2 83FF01   		cmpl	$1, %edi
+ 132 00d5 89FD     		movl	%edi, %ebp
+ 133 00d7 4889F3   		movq	%rsi, %rbx
+ 134 00da 7539     		jne	.L23
+ 135 00dc 31ED     		xorl	%ebp, %ebp
+ 237:targets.c     **** 		if(ctx->in_signed) {
+ 136              		.loc 1 237 0
+ 137 00de 80BAC000 		cmpb	$0, 192(%rdx)
+ 137      000000
+ 138 00e5 0F84F908 		je	.L175
+ 138      0000
+ 139              	.LVL9:
+ 140              	.L25:
+GAS LISTING /tmp/ccO1TY4U.s 			page 8
+
+
+ 141              	.LBB41:
+ 238:targets.c     **** 			int i;
+ 239:targets.c     **** 
+ 240:targets.c     **** 			for(i = 0; i < ctx->num_keys; i++)
+ 142              		.loc 1 240 0 discriminator 1
+ 143 00eb 41396E10 		cmpl	%ebp, 16(%r14)
+ 144 00ef 0F8EEF08 		jle	.L175
+ 144      0000
+ 241:targets.c     **** 				if(ctx->sigvalid[i])
+ 145              		.loc 1 241 0
+ 146 00f5 4180BC2E 		cmpb	$0, 172(%r14,%rbp)
+ 146      AC000000 
+ 146      00
+ 147 00fe 7410     		je	.L26
+ 242:targets.c     **** 					crypto_verify_putc(ctx->sig_ctxs[i], *data);
+ 148              		.loc 1 242 0
+ 149 0100 0FB633   		movzbl	(%rbx), %esi
+ 150 0103 498BBCEE 		movq	184(%r14,%rbp,8), %rdi
+ 150      B8000000 
+ 151 010b E8000000 		call	crypto_verify_putc
+ 151      00
+ 152              	.LVL10:
+ 153              	.L26:
+ 154 0110 48FFC5   		incq	%rbp
+ 155              	.LVL11:
+ 156 0113 EBD6     		jmp	.L25
+ 157              	.LVL12:
+ 158              	.L23:
+ 159              	.LBE41:
+ 160              	.LBB42:
+ 161              	.LBB43:
+ 243:targets.c     **** 		}
+ 244:targets.c     **** 		return false;
+ 245:targets.c     **** 	}
+ 246:targets.c     **** 
+ 247:targets.c     **** 	/* Application logic */
+ 248:targets.c     **** 	if(ev == GJ_EVENT_OBJBEGIN) {
+ 162              		.loc 1 248 0
+ 163 0115 83FF02   		cmpl	$2, %edi
+ 164 0118 0F85F300 		jne	.L28
+ 164      0000
+ 249:targets.c     **** 		if(path_equal(ctx->path, ctx->path_ind, KEY_SIGNATURES, KEY_ARRAY, KEY_NUMBER)) {
+ 165              		.loc 1 249 0
+ 166 011e 4C8DA288 		leaq	136(%rdx), %r12
+ 166      000000
+ 167 0125 8BB29C00 		movl	156(%rdx), %esi
+ 167      0000
+ 168 012b 31C0     		xorl	%eax, %eax
+ 169 012d 31D2     		xorl	%edx, %edx
+ 170              	.LVL13:
+ 171 012f 41B81300 		movl	$19, %r8d
+ 171      0000
+ 172 0135 B9120000 		movl	$18, %ecx
+ 172      00
+ 173 013a 4C89E7   		movq	%r12, %rdi
+ 174              	.LVL14:
+ 175 013d E8BEFEFF 		call	path_equal
+GAS LISTING /tmp/ccO1TY4U.s 			page 9
+
+
+ 175      FF
+ 176              	.LVL15:
+ 177 0142 84C0     		testb	%al, %al
+ 178 0144 7420     		je	.L29
+ 250:targets.c     **** 			/* Entered signature object, initialize state */
+ 251:targets.c     **** 			ctx->got_sig_keyid = false;
+ 179              		.loc 1 251 0
+ 180 0146 41C686A0 		movb	$0, 160(%r14)
+ 180      00000000 
+ 252:targets.c     **** 			ctx->got_sig_method = false;
+ 181              		.loc 1 252 0
+ 182 014e 41C686A1 		movb	$0, 161(%r14)
+ 182      00000000 
+ 253:targets.c     **** 			ctx->got_sig_sig = false;
+ 183              		.loc 1 253 0
+ 184 0156 41C686A2 		movb	$0, 162(%r14)
+ 184      00000000 
+ 254:targets.c     **** 			ctx->sig_ignore = false;
+ 185              		.loc 1 254 0
+ 186 015e 41C686A3 		movb	$0, 163(%r14)
+ 186      00000000 
+ 187              	.L29:
+ 255:targets.c     **** 		}
+ 256:targets.c     **** 		if(path_equal(ctx->path, ctx->path_ind, KEY_SIGNED, KEY_TARGETS, KEY_ANY, KEY_NUMBER)) {
+ 188              		.loc 1 256 0
+ 189 0166 418BB69C 		movl	156(%r14), %esi
+ 189      000000
+ 190 016d 31C0     		xorl	%eax, %eax
+ 191 016f 41B91300 		movl	$19, %r9d
+ 191      0000
+ 192 0175 41B81100 		movl	$17, %r8d
+ 192      0000
+ 193 017b B9070000 		movl	$7, %ecx
+ 193      00
+ 194 0180 BA040000 		movl	$4, %edx
+ 194      00
+ 195 0185 4C89E7   		movq	%r12, %rdi
+ 196 0188 E873FEFF 		call	path_equal
+ 196      FF
+ 197              	.LVL16:
+ 198 018d 84C0     		testb	%al, %al
+ 199 018f 7418     		je	.L30
+ 257:targets.c     **** 			/* Entered target, initialize state */
+ 258:targets.c     **** 			ctx->got_sig_keyid = false;
+ 200              		.loc 1 258 0
+ 201 0191 41C686A0 		movb	$0, 160(%r14)
+ 201      00000000 
+ 259:targets.c     **** 			ctx->ecuid_matches = false;
+ 202              		.loc 1 259 0
+ 203 0199 41C686AD 		movb	$0, 173(%r14)
+ 203      00000000 
+ 260:targets.c     **** 			ctx->hardwareid_matches = false;
+ 204              		.loc 1 260 0
+ 205 01a1 41C686AE 		movb	$0, 174(%r14)
+ 205      00000000 
+ 206              	.L30:
+ 261:targets.c     **** 		}
+GAS LISTING /tmp/ccO1TY4U.s 			page 10
+
+
+ 262:targets.c     **** 
+ 263:targets.c     **** 		if(path_equal(ctx->path, ctx->path_ind, KEY_SIGNED,  KEY_NUMBER)) {
+ 207              		.loc 1 263 0
+ 208 01a9 418BB69C 		movl	156(%r14), %esi
+ 208      000000
+ 209 01b0 4C89E7   		movq	%r12, %rdi
+ 210 01b3 31C0     		xorl	%eax, %eax
+ 211 01b5 B9130000 		movl	$19, %ecx
+ 211      00
+ 212 01ba BA040000 		movl	$4, %edx
+ 212      00
+ 213 01bf 4531E4   		xorl	%r12d, %r12d
+ 214 01c2 E839FEFF 		call	path_equal
+ 214      FF
+ 215              	.LVL17:
+ 216 01c7 84C0     		testb	%al, %al
+ 217 01c9 0F842708 		je	.L31
+ 217      0000
+ 218              	.L32:
+ 219              	.LVL18:
+ 220              	.LBB44:
+ 264:targets.c     **** 			int i;
+ 265:targets.c     **** 			/* Start verifying signatures */
+ 266:targets.c     **** 			for(i = 0; i < ctx->num_keys; i++)
+ 221              		.loc 1 266 0
+ 222 01cf 45396610 		cmpl	%r12d, 16(%r14)
+ 223 01d3 7E2F     		jle	.L179
+ 267:targets.c     **** 				if(ctx->sigvalid[i]) {
+ 224              		.loc 1 267 0
+ 225 01d5 4380BC26 		cmpb	$0, 172(%r14,%r12)
+ 225      AC000000 
+ 225      00
+ 226 01de 741F     		je	.L33
+ 268:targets.c     **** 					crypto_verify_ctx_init(ctx->sig_ctxs[i]);
+ 227              		.loc 1 268 0
+ 228 01e0 4B8BBCE6 		movq	184(%r14,%r12,8), %rdi
+ 228      B8000000 
+ 229 01e8 E8000000 		call	crypto_verify_ctx_init
+ 229      00
+ 230              	.LVL19:
+ 269:targets.c     **** 					crypto_verify_putc(ctx->sig_ctxs[i], '{');
+ 231              		.loc 1 269 0
+ 232 01ed 4B8BBCE6 		movq	184(%r14,%r12,8), %rdi
+ 232      B8000000 
+ 233 01f5 BE7B0000 		movl	$123, %esi
+ 233      00
+ 234 01fa E8000000 		call	crypto_verify_putc
+ 234      00
+ 235              	.LVL20:
+ 236              	.L33:
+ 237 01ff 49FFC4   		incq	%r12
+ 238              	.LVL21:
+ 239 0202 EBCB     		jmp	.L32
+ 240              	.LVL22:
+ 241              	.L179:
+ 270:targets.c     **** 				}
+ 271:targets.c     **** 			ctx->in_signed = true;
+GAS LISTING /tmp/ccO1TY4U.s 			page 11
+
+
+ 242              		.loc 1 271 0
+ 243 0204 41C686C0 		movb	$1, 192(%r14)
+ 243      00000001 
+ 244 020c E9F70100 		jmp	.L35
+ 244      00
+ 245              	.LVL23:
+ 246              	.L28:
+ 247              	.LBE44:
+ 272:targets.c     **** 		}
+ 273:targets.c     **** 	}
+ 274:targets.c     **** 	
+ 275:targets.c     **** 	if(ev == GJ_EVENT_OBJEND) {
+ 248              		.loc 1 275 0
+ 249 0211 83FF03   		cmpl	$3, %edi
+ 250 0214 0F85EE01 		jne	.L35
+ 250      0000
+ 276:targets.c     **** 		if(path_equal(ctx->path, ctx->path_ind, KEY_SIGNATURES, KEY_ARRAY, KEY_NUMBER)) {
+ 251              		.loc 1 276 0
+ 252 021a 4C8DA288 		leaq	136(%rdx), %r12
+ 252      000000
+ 253 0221 8BB29C00 		movl	156(%rdx), %esi
+ 253      0000
+ 254 0227 31C0     		xorl	%eax, %eax
+ 255 0229 31D2     		xorl	%edx, %edx
+ 256              	.LVL24:
+ 257 022b 41B81300 		movl	$19, %r8d
+ 257      0000
+ 258 0231 B9120000 		movl	$18, %ecx
+ 258      00
+ 259 0236 4C89E7   		movq	%r12, %rdi
+ 260              	.LVL25:
+ 261 0239 E8C2FDFF 		call	path_equal
+ 261      FF
+ 262              	.LVL26:
+ 263 023e 84C0     		testb	%al, %al
+ 264 0240 7460     		je	.L36
+ 277:targets.c     **** 			/* Exited signature object, set signature validness */
+ 278:targets.c     **** 			if(!ctx->sig_ignore && ctx->got_sig_keyid && ctx->got_sig_method &&
+ 265              		.loc 1 278 0
+ 266 0242 4180BEA3 		cmpb	$0, 163(%r14)
+ 266      00000000 
+ 267 024a 7556     		jne	.L36
+ 268 024c 4180BEA0 		cmpb	$0, 160(%r14)
+ 268      00000000 
+ 269 0254 744C     		je	.L36
+ 270 0256 4180BEA1 		cmpb	$0, 161(%r14)
+ 270      00000000 
+ 271 025e 7442     		je	.L36
+ 279:targets.c     **** 			    ctx->got_sig_sig) {
+ 272              		.loc 1 279 0
+ 273 0260 458ABEA2 		movb	162(%r14), %r15b
+ 273      000000
+ 278:targets.c     **** 			    ctx->got_sig_sig) {
+ 274              		.loc 1 278 0
+ 275 0267 4584FF   		testb	%r15b, %r15b
+ 276 026a 7436     		je	.L36
+ 280:targets.c     **** 				ctx->sigvalid[ctx->current_sig] = true;
+GAS LISTING /tmp/ccO1TY4U.s 			page 12
+
+
+ 277              		.loc 1 280 0
+ 278 026c 4D63AEA4 		movslq	164(%r14), %r13
+ 278      000000
+ 279 0273 43C6842E 		movb	$1, 172(%r14,%r13)
+ 279      AC000000 
+ 279      01
+ 281:targets.c     **** 				ctx->sig_ctxs[ctx->current_sig] = crypto_verify_ctx_new();
+ 280              		.loc 1 281 0
+ 281 027c E8000000 		call	crypto_verify_ctx_new
+ 281      00
+ 282              	.LVL27:
+ 282:targets.c     **** 				if(!ctx->sig_ctxs[ctx->current_sig]) {
+ 283              		.loc 1 282 0
+ 284 0281 4885C0   		testq	%rax, %rax
+ 281:targets.c     **** 				ctx->sig_ctxs[ctx->current_sig] = crypto_verify_ctx_new();
+ 285              		.loc 1 281 0
+ 286 0284 4B8984EE 		movq	%rax, 184(%r14,%r13,8)
+ 286      B8000000 
+ 287              		.loc 1 282 0
+ 288 028c 750D     		jne	.L37
+ 283:targets.c     **** 					ctx->res = TARGETS_NOMEM;
+ 289              		.loc 1 283 0
+ 290 028e 41C74670 		movl	$3, 112(%r14)
+ 290      03000000 
+ 291 0296 E9670700 		jmp	.L20
+ 291      00
+ 292              	.L37:
+ 284:targets.c     **** 					return true;
+ 285:targets.c     **** 				}
+ 286:targets.c     **** 				++ctx->sigs_found;
+ 293              		.loc 1 286 0
+ 294 029b 41FF86A8 		incl	168(%r14)
+ 294      000000
+ 295              	.L36:
+ 287:targets.c     **** 			}
+ 288:targets.c     **** 		}
+ 289:targets.c     **** 		if(path_equal(ctx->path, ctx->path_ind, KEY_SIGNED, KEY_TARGETS, KEY_ANY, KEY_NUMBER)) {
+ 296              		.loc 1 289 0
+ 297 02a2 418BB69C 		movl	156(%r14), %esi
+ 297      000000
+ 298 02a9 31C0     		xorl	%eax, %eax
+ 299 02ab 41B91300 		movl	$19, %r9d
+ 299      0000
+ 300 02b1 41B81100 		movl	$17, %r8d
+ 300      0000
+ 301 02b7 B9070000 		movl	$7, %ecx
+ 301      00
+ 302 02bc BA040000 		movl	$4, %edx
+ 302      00
+ 303 02c1 4C89E7   		movq	%r12, %rdi
+ 304 02c4 E837FDFF 		call	path_equal
+ 304      FF
+ 305              	.LVL28:
+ 306 02c9 84C0     		testb	%al, %al
+ 307 02cb 7435     		je	.L38
+ 290:targets.c     **** 			if(ctx->ecuid_matches && ctx->hardwareid_matches) {
+ 308              		.loc 1 290 0
+GAS LISTING /tmp/ccO1TY4U.s 			page 13
+
+
+ 309 02cd 4180BEAD 		cmpb	$0, 173(%r14)
+ 309      00000000 
+ 310 02d5 742B     		je	.L38
+ 311 02d7 4180BEAE 		cmpb	$0, 174(%r14)
+ 311      00000000 
+ 312 02df 7421     		je	.L38
+ 291:targets.c     **** 				if(ctx->got_image) {
+ 313              		.loc 1 291 0
+ 314 02e1 458ABE87 		movb	135(%r14), %r15b
+ 314      000000
+ 315 02e8 4584FF   		testb	%r15b, %r15b
+ 316 02eb 740D     		je	.L39
+ 292:targets.c     **** 					ctx->res = TARGETS_ECUDUPLICATE;
+ 317              		.loc 1 292 0
+ 318 02ed 41C74670 		movl	$5, 112(%r14)
+ 318      05000000 
+ 319 02f5 E9080700 		jmp	.L20
+ 319      00
+ 320              	.L39:
+ 293:targets.c     **** 					return true;
+ 294:targets.c     **** 				}
+ 295:targets.c     **** 				ctx->got_image = true;
+ 321              		.loc 1 295 0
+ 322 02fa 41C68687 		movb	$1, 135(%r14)
+ 322      00000001 
+ 323              	.L38:
+ 296:targets.c     **** 			}
+ 297:targets.c     **** 		}
+ 298:targets.c     **** 
+ 299:targets.c     **** 		if(path_equal(ctx->path, ctx->path_ind, KEY_SIGNED,  KEY_NUMBER)) {
+ 324              		.loc 1 299 0
+ 325 0302 418BB69C 		movl	156(%r14), %esi
+ 325      000000
+ 326 0309 31C0     		xorl	%eax, %eax
+ 327 030b B9130000 		movl	$19, %ecx
+ 327      00
+ 328 0310 BA040000 		movl	$4, %edx
+ 328      00
+ 329 0315 4C89E7   		movq	%r12, %rdi
+ 330 0318 E8E3FCFF 		call	path_equal
+ 330      FF
+ 331              	.LVL29:
+ 332 031d 84C0     		testb	%al, %al
+ 333 031f 4188C7   		movb	%al, %r15b
+ 334 0322 7457     		je	.L40
+ 335 0324 88C2     		movb	%al, %dl
+ 336 0326 4531E4   		xorl	%r12d, %r12d
+ 337              	.L41:
+ 338              	.LVL30:
+ 339              	.LBB45:
+ 300:targets.c     **** 			/* Start verifying signatures */
+ 301:targets.c     **** 			bool valid = true;
+ 302:targets.c     **** 			int i;
+ 303:targets.c     **** 			/* trailing '}' has already been processed in GJ_EVENT_CHAR */
+ 304:targets.c     **** 			for(i = 0; i < ctx->num_keys; i++)
+ 340              		.loc 1 304 0
+ 341 0329 45396610 		cmpl	%r12d, 16(%r14)
+GAS LISTING /tmp/ccO1TY4U.s 			page 14
+
+
+ 342 032d 7E2B     		jle	.L180
+ 305:targets.c     **** 				if(ctx->sigvalid[i])
+ 343              		.loc 1 305 0
+ 344 032f 4380BC26 		cmpb	$0, 172(%r14,%r12)
+ 344      AC000000 
+ 344      00
+ 345 0338 741B     		je	.L42
+ 306:targets.c     **** 					valid = valid && crypto_verify_result(ctx->sig_ctxs[i]);
+ 346              		.loc 1 306 0
+ 347 033a 31C0     		xorl	%eax, %eax
+ 348 033c 84D2     		testb	%dl, %dl
+ 349 033e 7410     		je	.L43
+ 350 0340 4B8BBCE6 		movq	184(%r14,%r12,8), %rdi
+ 350      B8000000 
+ 351 0348 E8000000 		call	crypto_verify_result
+ 351      00
+ 352              	.LVL31:
+ 353 034d 0FB6C0   		movzbl	%al, %eax
+ 354              	.L43:
+ 355 0350 88C2     		movb	%al, %dl
+ 356 0352 83E201   		andl	$1, %edx
+ 357              	.LVL32:
+ 358              	.L42:
+ 359 0355 49FFC4   		incq	%r12
+ 360              	.LVL33:
+ 361 0358 EBCF     		jmp	.L41
+ 362              	.LVL34:
+ 363              	.L180:
+ 307:targets.c     **** 			if(!valid) {
+ 364              		.loc 1 307 0
+ 365 035a 84D2     		testb	%dl, %dl
+ 366 035c 750D     		jne	.L45
+ 308:targets.c     **** 				ctx->res = TARGETS_VERIFICATION_FAILED;
+ 367              		.loc 1 308 0
+ 368 035e 41C74670 		movl	$8, 112(%r14)
+ 368      08000000 
+ 369 0366 E9970600 		jmp	.L20
+ 369      00
+ 370              	.L45:
+ 309:targets.c     **** 				return true;
+ 310:targets.c     **** 			}
+ 311:targets.c     **** 			ctx->in_signed = false;
+ 371              		.loc 1 311 0
+ 372 036b 41C686C0 		movb	$0, 192(%r14)
+ 372      00000000 
+ 312:targets.c     **** 			ctx->signatures_checked = true;
+ 373              		.loc 1 312 0
+ 374 0373 41C68686 		movb	$1, 134(%r14)
+ 374      00000001 
+ 375              	.LVL35:
+ 376              	.L40:
+ 377              	.LBE45:
+ 313:targets.c     **** 		}
+ 314:targets.c     **** 
+ 315:targets.c     **** 		// exiting top-level object, prepare result
+ 316:targets.c     **** 		if(ctx->path_ind == 0) {
+ 378              		.loc 1 316 0
+GAS LISTING /tmp/ccO1TY4U.s 			page 15
+
+
+ 379 037b 4183BE9C 		cmpl	$0, 156(%r14)
+ 379      00000000 
+ 380 0383 0F856D06 		jne	.L31
+ 380      0000
+ 381              	.LVL36:
+ 382              	.LBB46:
+ 383              	.LBB47:
+ 208:targets.c     **** 		return TARGETS_NOVERSION;
+ 384              		.loc 1 208 0
+ 385 0389 4180BE84 		cmpb	$0, 132(%r14)
+ 385      00000000 
+ 209:targets.c     **** 	if(!ctx->time_checked)
+ 386              		.loc 1 209 0
+ 387 0391 B80D0000 		movl	$13, %eax
+ 387      00
+ 208:targets.c     **** 		return TARGETS_NOVERSION;
+ 388              		.loc 1 208 0
+ 389 0396 7467     		je	.L46
+ 210:targets.c     **** 		return TARGETS_NOTIME;
+ 390              		.loc 1 210 0
+ 391 0398 4180BE85 		cmpb	$0, 133(%r14)
+ 391      00000000 
+ 211:targets.c     **** 	if(!ctx->signatures_checked)
+ 392              		.loc 1 211 0
+ 393 03a0 B80E0000 		movl	$14, %eax
+ 393      00
+ 210:targets.c     **** 		return TARGETS_NOTIME;
+ 394              		.loc 1 210 0
+ 395 03a5 7458     		je	.L46
+ 212:targets.c     **** 		return TARGETS_NOSIGS;
+ 396              		.loc 1 212 0
+ 397 03a7 4180BE86 		cmpb	$0, 134(%r14)
+ 397      00000000 
+ 213:targets.c     **** 	if(ctx->sigs_found < ctx->threshold)
+ 398              		.loc 1 213 0
+ 399 03af B80F0000 		movl	$15, %eax
+ 399      00
+ 212:targets.c     **** 		return TARGETS_NOSIGS;
+ 400              		.loc 1 212 0
+ 401 03b4 7449     		je	.L46
+ 214:targets.c     **** 		return TARGETS_LOWSIGS;
+ 402              		.loc 1 214 0
+ 403 03b6 418B5E14 		movl	20(%r14), %ebx
+ 404              	.LVL37:
+ 405 03ba 41399EA8 		cmpl	%ebx, 168(%r14)
+ 405      000000
+ 215:targets.c     **** 	if(!ctx->got_image) {
+ 406              		.loc 1 215 0
+ 407 03c1 B8100000 		movl	$16, %eax
+ 407      00
+ 214:targets.c     **** 		return TARGETS_LOWSIGS;
+ 408              		.loc 1 214 0
+ 409 03c6 7C37     		jl	.L46
+ 216:targets.c     **** 		if(!ctx->hash_found)
+ 410              		.loc 1 216 0
+ 411 03c8 4180BE87 		cmpb	$0, 135(%r14)
+ 411      00000000 
+GAS LISTING /tmp/ccO1TY4U.s 			page 16
+
+
+ 412 03d0 751E     		jne	.L47
+ 217:targets.c     **** 			return TARGETS_NOHASH;
+ 413              		.loc 1 217 0
+ 414 03d2 4180BEAF 		cmpb	$0, 175(%r14)
+ 414      00000000 
+ 218:targets.c     **** 		if(!ctx->length_found)
+ 415              		.loc 1 218 0
+ 416 03da B8060000 		movl	$6, %eax
+ 416      00
+ 217:targets.c     **** 			return TARGETS_NOHASH;
+ 417              		.loc 1 217 0
+ 418 03df 741E     		je	.L46
+ 221:targets.c     **** 	}
+ 419              		.loc 1 221 0
+ 420 03e1 4180BEB0 		cmpb	$1, 176(%r14)
+ 420      00000001 
+ 421 03e9 19C0     		sbbl	%eax, %eax
+ 422 03eb 83E007   		andl	$7, %eax
+ 423 03ee EB0F     		jmp	.L46
+ 424              	.L47:
+ 225:targets.c     **** }
+ 425              		.loc 1 225 0
+ 426 03f0 418B06   		movl	(%r14), %eax
+ 427 03f3 41394668 		cmpl	%eax, 104(%r14)
+ 428 03f7 0F95C0   		setne	%al
+ 429 03fa 0FB6C0   		movzbl	%al, %eax
+ 430 03fd FFC0     		incl	%eax
+ 431              	.L46:
+ 432              	.LVL38:
+ 433              	.LBE47:
+ 434              	.LBE46:
+ 317:targets.c     **** 			ctx->res = checkresult(ctx);
+ 435              		.loc 1 317 0
+ 436 03ff 41894670 		movl	%eax, 112(%r14)
+ 437 0403 E9E90500 		jmp	.L176
+ 437      00
+ 438              	.LVL39:
+ 439              	.L35:
+ 318:targets.c     **** 			return true;
+ 319:targets.c     **** 		}
+ 320:targets.c     **** 	}
+ 321:targets.c     **** 
+ 322:targets.c     **** 	if (ev >= GJ_EVENT_STRING && ev <= GJ_EVENT_NUMBER) {
+ 440              		.loc 1 322 0
+ 441 0408 8D45F9   		leal	-7(%rbp), %eax
+ 442 040b 83F802   		cmpl	$2, %eax
+ 443 040e 89442418 		movl	%eax, 24(%rsp)
+ 444 0412 0F875B04 		ja	.L69
+ 444      0000
+ 445              	.LVL40:
+ 446              	.LBB48:
+ 323:targets.c     **** 		/* Only some of the path->value combinations are valid. If success was not
+ 324:targets.c     **** 		 * set to true by some of the subsequent clauses, return JSON error */
+ 325:targets.c     **** 		bool success = false;
+ 326:targets.c     **** 
+ 327:targets.c     **** 		targets_key_t* path = ctx->path;
+ 328:targets.c     **** 		int path_len = ctx->path_ind;
+GAS LISTING /tmp/ccO1TY4U.s 			page 17
+
+
+ 447              		.loc 1 328 0
+ 448 0418 418B869C 		movl	156(%r14), %eax
+ 448      000000
+ 327:targets.c     **** 		int path_len = ctx->path_ind;
+ 449              		.loc 1 327 0
+ 450 041f 4D8DAE88 		leaq	136(%r14), %r13
+ 450      000000
+ 451              	.LVL41:
+ 329:targets.c     **** 
+ 330:targets.c     **** 
+ 331:targets.c     **** 		if(path_equal(path, path_len, KEY_SIGNATURES, KEY_ARRAY, KEY_KEYID, KEY_NUMBER))
+ 452              		.loc 1 331 0
+ 453 0426 31D2     		xorl	%edx, %edx
+ 454 0428 41B91300 		movl	$19, %r9d
+ 454      0000
+ 455 042e 41B80100 		movl	$1, %r8d
+ 455      0000
+ 456 0434 B9120000 		movl	$18, %ecx
+ 456      00
+ 457 0439 4C89EF   		movq	%r13, %rdi
+ 328:targets.c     **** 
+ 458              		.loc 1 328 0
+ 459 043c 8944240C 		movl	%eax, 12(%rsp)
+ 460              	.LVL42:
+ 461              		.loc 1 331 0
+ 462 0440 89C6     		movl	%eax, %esi
+ 463 0442 31C0     		xorl	%eax, %eax
+ 464              	.LVL43:
+ 465 0444 E8B7FBFF 		call	path_equal
+ 465      FF
+ 466              	.LVL44:
+ 467 0449 84C0     		testb	%al, %al
+ 468 044b 4188C4   		movb	%al, %r12b
+ 469 044e 0F84BA00 		je	.L49
+ 469      0000
+ 470              	.LVL45:
+ 471              	.LBB49:
+ 472              	.LBB50:
+ 154:targets.c     **** 		return true;
+ 473              		.loc 1 154 0
+ 474 0454 458ABEA3 		movb	163(%r14), %r15b
+ 474      000000
+ 475 045b 4584FF   		testb	%r15b, %r15b
+ 476 045e 0F85A700 		jne	.L50
+ 476      0000
+ 157:targets.c     **** 	if(len != 2*CRYPTO_KEYID_LEN)
+ 477              		.loc 1 157 0
+ 478 0464 BE400000 		movl	$64, %esi
+ 478      00
+ 479 0469 4889DF   		movq	%rbx, %rdi
+ 480 046c E8000000 		call	strnlen
+ 480      00
+ 481              	.LVL46:
+ 158:targets.c     **** 		return false;
+ 482              		.loc 1 158 0
+ 483 0471 4883F840 		cmpq	$64, %rax
+ 484 0475 0F859000 		jne	.L50
+GAS LISTING /tmp/ccO1TY4U.s 			page 18
+
+
+ 484      0000
+ 485 047b 4531FF   		xorl	%r15d, %r15d
+ 486              	.LVL47:
+ 487              	.L51:
+ 488              	.LBB51:
+ 162:targets.c     **** 
+ 489              		.loc 1 162 0
+ 490 047e 4488F9   		movb	%r15b, %cl
+ 491 0481 4489F8   		movl	%r15d, %eax
+ 492 0484 420FB63C 		movzbl	(%rbx,%r15,2), %edi
+ 492      7B
+ 493 0489 D3E0     		sall	%cl, %eax
+ 494 048b 49FFC7   		incq	%r15
+ 495              	.LVL48:
+ 496 048e FFC0     		incl	%eax
+ 497 0490 4898     		cltq
+ 498 0492 0FB63403 		movzbl	(%rbx,%rax), %esi
+ 499 0496 31C0     		xorl	%eax, %eax
+ 500 0498 E8000000 		call	hex
+ 500      00
+ 501              	.LVL49:
+ 502 049d 4288443C 		movb	%al, 31(%rsp,%r15)
+ 502      1F
+ 503              	.LBE51:
+ 161:targets.c     **** 		keyid[i] = hex(data[i << 1], data[1+ (i << i)]);
+ 504              		.loc 1 161 0
+ 505 04a2 4983FF20 		cmpq	$32, %r15
+ 506 04a6 75D6     		jne	.L51
+ 165:targets.c     **** 		if(!memcmp(ctx->sigs[i]->key->keyid, keyid, CRYPTO_KEYID_LEN)) {
+ 507              		.loc 1 165 0
+ 508 04a8 418B4610 		movl	16(%r14), %eax
+ 164:targets.c     **** 	for(i = 0; i < ctx->num_keys; i++)
+ 509              		.loc 1 164 0
+ 510 04ac 41C686A3 		movb	$1, 163(%r14)
+ 510      00000001 
+ 511              	.LVL50:
+ 165:targets.c     **** 		if(!memcmp(ctx->sigs[i]->key->keyid, keyid, CRYPTO_KEYID_LEN)) {
+ 512              		.loc 1 165 0
+ 513 04b4 4531FF   		xorl	%r15d, %r15d
+ 514 04b7 89442410 		movl	%eax, 16(%rsp)
+ 515              	.LVL51:
+ 516              	.L52:
+ 517 04bb 443B7C24 		cmpl	16(%rsp), %r15d
+ 517      10
+ 518 04c0 4589F8   		movl	%r15d, %r8d
+ 519              	.LVL52:
+ 520 04c3 7D3B     		jge	.L53
+ 166:targets.c     **** 			ctx->current_sig = i;
+ 521              		.loc 1 166 0
+ 522 04c5 4B8B44FE 		movq	8(%r14,%r15,8), %rax
+ 522      08
+ 523 04ca 488D7424 		leaq	32(%rsp), %rsi
+ 523      20
+ 524 04cf BA200000 		movl	$32, %edx
+ 524      00
+ 525 04d4 44894424 		movl	%r8d, 28(%rsp)
+ 525      1C
+GAS LISTING /tmp/ccO1TY4U.s 			page 19
+
+
+ 526 04d9 49FFC7   		incq	%r15
+ 527 04dc 488B38   		movq	(%rax), %rdi
+ 528 04df 4883C704 		addq	$4, %rdi
+ 529 04e3 E8000000 		call	memcmp
+ 529      00
+ 530              	.LVL53:
+ 531 04e8 85C0     		testl	%eax, %eax
+ 532 04ea 448B4424 		movl	28(%rsp), %r8d
+ 532      1C
+ 533 04ef 75CA     		jne	.L52
+ 167:targets.c     **** 			ctx->sig_ignore = false;
+ 534              		.loc 1 167 0
+ 535 04f1 458986A4 		movl	%r8d, 164(%r14)
+ 535      000000
+ 168:targets.c     **** 			break;
+ 536              		.loc 1 168 0
+ 537 04f8 41C686A3 		movb	$0, 163(%r14)
+ 537      00000000 
+ 538              	.LVL54:
+ 539              	.L53:
+ 171:targets.c     **** 	return true;
+ 540              		.loc 1 171 0
+ 541 0500 41C686A0 		movb	$1, 160(%r14)
+ 541      00000001 
+ 172:targets.c     **** }
+ 542              		.loc 1 172 0
+ 543 0508 4588E7   		movb	%r12b, %r15b
+ 544              	.LVL55:
+ 545              	.L50:
+ 546              	.LBE50:
+ 547              	.LBE49:
+ 332:targets.c     **** 			success = process_keyid(ctx, data);
+ 548              		.loc 1 332 0
+ 549 050b 4588FC   		movb	%r15b, %r12b
+ 550              	.L49:
+ 551              	.LVL56:
+ 333:targets.c     **** 
+ 334:targets.c     **** 
+ 335:targets.c     **** 		if(path_equal(path, path_len, KEY_SIGNATURES, KEY_ARRAY, KEY_METHOD, KEY_NUMBER))
+ 552              		.loc 1 335 0
+ 553 050e 8B74240C 		movl	12(%rsp), %esi
+ 554 0512 31D2     		xorl	%edx, %edx
+ 555 0514 31C0     		xorl	%eax, %eax
+ 556 0516 41B91300 		movl	$19, %r9d
+ 556      0000
+ 557 051c 41B80200 		movl	$2, %r8d
+ 557      0000
+ 558 0522 B9120000 		movl	$18, %ecx
+ 558      00
+ 559 0527 4C89EF   		movq	%r13, %rdi
+ 560 052a E8D1FAFF 		call	path_equal
+ 560      FF
+ 561              	.LVL57:
+ 562 052f 84C0     		testb	%al, %al
+ 563 0531 4188C7   		movb	%al, %r15b
+ 564 0534 7434     		je	.L55
+ 565              	.LVL58:
+GAS LISTING /tmp/ccO1TY4U.s 			page 20
+
+
+ 566              	.LBB52:
+ 567              	.LBB53:
+ 177:targets.c     **** 	ctx->got_sig_method = true;
+ 568              		.loc 1 177 0
+ 569 0536 4180BEA3 		cmpb	$0, 163(%r14)
+ 569      00000000 
+ 570 053e B8010000 		movl	$1, %eax
+ 570      00
+ 571 0543 750B     		jne	.L56
+ 572 0545 4889DF   		movq	%rbx, %rdi
+ 573              	.LVL59:
+ 574 0548 E8000000 		call	crypto_keytype_supported
+ 574      00
+ 575              	.LVL60:
+ 576 054d 0FB6C0   		movzbl	%al, %eax
+ 577              	.L56:
+ 578 0550 418886A3 		movb	%al, 163(%r14)
+ 578      000000
+ 579 0557 4180A6A3 		andb	$1, 163(%r14)
+ 579      00000001 
+ 580              	.LBE53:
+ 581              	.LBE52:
+ 336:targets.c     **** 			success = process_method(ctx, data);
+ 582              		.loc 1 336 0
+ 583 055f 4588FC   		movb	%r15b, %r12b
+ 584              	.LVL61:
+ 585              	.LBB55:
+ 586              	.LBB54:
+ 178:targets.c     **** 	return true;
+ 587              		.loc 1 178 0
+ 588 0562 41C686A1 		movb	$1, 161(%r14)
+ 588      00000001 
+ 589              	.LVL62:
+ 590              	.L55:
+ 591              	.LBE54:
+ 592              	.LBE55:
+ 337:targets.c     **** 
+ 338:targets.c     **** 		if(path_equal(path, path_len, KEY_SIGNATURES, KEY_ARRAY, KEY_SIG, KEY_NUMBER))
+ 593              		.loc 1 338 0
+ 594 056a 8B74240C 		movl	12(%rsp), %esi
+ 595 056e 31D2     		xorl	%edx, %edx
+ 596 0570 31C0     		xorl	%eax, %eax
+ 597 0572 41B91300 		movl	$19, %r9d
+ 597      0000
+ 598 0578 41B80300 		movl	$3, %r8d
+ 598      0000
+ 599 057e B9120000 		movl	$18, %ecx
+ 599      00
+ 600 0583 4C89EF   		movq	%r13, %rdi
+ 601 0586 E875FAFF 		call	path_equal
+ 601      FF
+ 602              	.LVL63:
+ 603 058b 84C0     		testb	%al, %al
+ 604 058d 747D     		je	.L57
+ 605              	.LVL64:
+ 606              	.LBB56:
+ 607              	.LBB57:
+GAS LISTING /tmp/ccO1TY4U.s 			page 21
+
+
+ 188:targets.c     **** 		return true;
+ 608              		.loc 1 188 0
+ 609 058f 458AA6A3 		movb	163(%r14), %r12b
+ 609      000000
+ 610              	.LVL65:
+ 611 0596 4584E4   		testb	%r12b, %r12b
+ 612 0599 7571     		jne	.L57
+ 192:targets.c     **** 		return false;
+ 613              		.loc 1 192 0
+ 614 059b 458ABEA0 		movb	160(%r14), %r15b
+ 614      000000
+ 615 05a2 4584FF   		testb	%r15b, %r15b
+ 616 05a5 7465     		je	.L57
+ 195:targets.c     **** 	if(len != 2*CRYPTO_SIGNATURE_LEN)
+ 617              		.loc 1 195 0
+ 618 05a7 4883C9FF 		orq	$-1, %rcx
+ 619 05ab 4889DF   		movq	%rbx, %rdi
+ 620              	.LVL66:
+ 621 05ae 4488E0   		movb	%r12b, %al
+ 622 05b1 F2AE     		repnz scasb
+ 623              	.LVL67:
+ 624 05b3 48F7D1   		notq	%rcx
+ 625              	.LVL68:
+ 196:targets.c     **** 		return false;
+ 626              		.loc 1 196 0
+ 627 05b6 81F98100 		cmpl	$129, %ecx
+ 627      0000
+ 628 05bc 754E     		jne	.L57
+ 199:targets.c     **** 	for(i = 0; i < CRYPTO_SIGNATURE_LEN; i++)
+ 629              		.loc 1 199 0
+ 630 05be 496386A4 		movslq	164(%r14), %rax
+ 630      000000
+ 631 05c5 4531E4   		xorl	%r12d, %r12d
+ 632 05c8 498B54C6 		movq	8(%r14,%rax,8), %rdx
+ 632      08
+ 633              	.LVL69:
+ 634              	.L58:
+ 635              	.LBB58:
+ 201:targets.c     **** 
+ 636              		.loc 1 201 0
+ 637 05cd 4488E1   		movb	%r12b, %cl
+ 638 05d0 4489E0   		movl	%r12d, %eax
+ 639 05d3 420FB63C 		movzbl	(%rbx,%r12,2), %edi
+ 639      63
+ 640 05d8 D3E0     		sall	%cl, %eax
+ 641 05da 48895424 		movq	%rdx, 16(%rsp)
+ 641      10
+ 642              	.LVL70:
+ 643 05df FFC0     		incl	%eax
+ 644 05e1 4898     		cltq
+ 645 05e3 0FB63403 		movzbl	(%rbx,%rax), %esi
+ 646 05e7 31C0     		xorl	%eax, %eax
+ 647 05e9 E8000000 		call	hex
+ 647      00
+ 648              	.LVL71:
+ 649 05ee 488B5424 		movq	16(%rsp), %rdx
+ 649      10
+GAS LISTING /tmp/ccO1TY4U.s 			page 22
+
+
+ 650 05f3 42884422 		movb	%al, 8(%rdx,%r12)
+ 650      08
+ 651              	.LVL72:
+ 652 05f8 49FFC4   		incq	%r12
+ 653              	.LVL73:
+ 654              	.LBE58:
+ 200:targets.c     **** 		s->sig[i] = hex(data[i << 1], data[1+ (i << i)]);
+ 655              		.loc 1 200 0
+ 656 05fb 4983FC40 		cmpq	$64, %r12
+ 657 05ff 75CC     		jne	.L58
+ 203:targets.c     **** 	return true;
+ 658              		.loc 1 203 0
+ 659 0601 41C686A2 		movb	$1, 162(%r14)
+ 659      00000001 
+ 204:targets.c     **** }
+ 660              		.loc 1 204 0
+ 661 0609 4588FC   		movb	%r15b, %r12b
+ 662              	.LVL74:
+ 663              	.L57:
+ 664              	.LBE57:
+ 665              	.LBE56:
+ 339:targets.c     **** 			success = process_sig(ctx, data);
+ 340:targets.c     **** 
+ 341:targets.c     **** 		if(path_equal(path, path_len, KEY_SIGNED, KEY_TYPE, KEY_NUMBER)) {
+ 666              		.loc 1 341 0
+ 667 060c 8B74240C 		movl	12(%rsp), %esi
+ 668 0610 31C0     		xorl	%eax, %eax
+ 669 0612 41B81300 		movl	$19, %r8d
+ 669      0000
+ 670 0618 B9050000 		movl	$5, %ecx
+ 670      00
+ 671 061d BA040000 		movl	$4, %edx
+ 671      00
+ 672 0622 4C89EF   		movq	%r13, %rdi
+ 673 0625 E8D6F9FF 		call	path_equal
+ 673      FF
+ 674              	.LVL75:
+ 675 062a 84C0     		testb	%al, %al
+ 676 062c 4188C7   		movb	%al, %r15b
+ 677 062f 7421     		je	.L59
+ 678              	.LVL76:
+ 342:targets.c     **** 			if(strcmp(data, "Targets")) {
+ 679              		.loc 1 342 0
+ 680 0631 BE000000 		movl	$.LC0, %esi
+ 680      00
+ 681 0636 4889DF   		movq	%rbx, %rdi
+ 682              	.LVL77:
+ 343:targets.c     **** 				ctx->res = TARGETS_WRONGTYPE;
+ 344:targets.c     **** 				return true;
+ 345:targets.c     **** 			}
+ 346:targets.c     **** 			success = true;
+ 683              		.loc 1 346 0
+ 684 0639 4588FC   		movb	%r15b, %r12b
+ 685              	.LVL78:
+ 342:targets.c     **** 			if(strcmp(data, "Targets")) {
+ 686              		.loc 1 342 0
+ 687 063c E8000000 		call	strcmp
+GAS LISTING /tmp/ccO1TY4U.s 			page 23
+
+
+ 687      00
+ 688              	.LVL79:
+ 689 0641 85C0     		testl	%eax, %eax
+ 690 0643 740D     		je	.L59
+ 343:targets.c     **** 				ctx->res = TARGETS_WRONGTYPE;
+ 691              		.loc 1 343 0
+ 692 0645 41C74670 		movl	$10, 112(%r14)
+ 692      0A000000 
+ 693 064d E9B00300 		jmp	.L20
+ 693      00
+ 694              	.L59:
+ 695              	.LVL80:
+ 347:targets.c     **** 		}
+ 348:targets.c     **** 	
+ 349:targets.c     **** 		if(path_equal(path, path_len, KEY_SIGNED, KEY_EXPIRES, KEY_NUMBER)) {
+ 696              		.loc 1 349 0
+ 697 0652 8B74240C 		movl	12(%rsp), %esi
+ 698 0656 31C0     		xorl	%eax, %eax
+ 699 0658 41B81300 		movl	$19, %r8d
+ 699      0000
+ 700 065e B9060000 		movl	$6, %ecx
+ 700      00
+ 701 0663 BA040000 		movl	$4, %edx
+ 701      00
+ 702 0668 4C89EF   		movq	%r13, %rdi
+ 703 066b E890F9FF 		call	path_equal
+ 703      FF
+ 704              	.LVL81:
+ 705 0670 84C0     		testb	%al, %al
+ 706 0672 4188C7   		movb	%al, %r15b
+ 707 0675 7428     		je	.L60
+ 708              	.LVL82:
+ 709              	.LBB59:
+ 350:targets.c     **** 			if(get_time(data) <= ctx->time) {
+ 710              		.loc 1 350 0
+ 711 0677 31C0     		xorl	%eax, %eax
+ 712 0679 4889DF   		movq	%rbx, %rdi
+ 713              	.LVL83:
+ 714 067c E8000000 		call	get_time
+ 714      00
+ 715              	.LVL84:
+ 716 0681 413B4604 		cmpl	4(%r14), %eax
+ 717 0685 770D     		ja	.L61
+ 351:targets.c     **** 				ctx->res = TARGETS_EXPIRED;
+ 718              		.loc 1 351 0
+ 719 0687 41C74670 		movl	$11, 112(%r14)
+ 719      0B000000 
+ 720 068f E96E0300 		jmp	.L20
+ 720      00
+ 721              	.L61:
+ 722              	.LBE59:
+ 352:targets.c     **** 				return true;
+ 353:targets.c     **** 			}
+ 354:targets.c     **** 			ctx->time_checked = true;
+ 723              		.loc 1 354 0
+ 724 0694 41C68685 		movb	$1, 133(%r14)
+ 724      00000001 
+GAS LISTING /tmp/ccO1TY4U.s 			page 24
+
+
+ 725              	.LVL85:
+ 355:targets.c     **** 			success = true;
+ 726              		.loc 1 355 0
+ 727 069c 4588FC   		movb	%r15b, %r12b
+ 728              	.LVL86:
+ 729              	.L60:
+ 356:targets.c     **** 		}
+ 357:targets.c     **** 
+ 358:targets.c     **** 		if(path_equal(path, path_len, KEY_SIGNED, KEY_VERSION, KEY_NUMBER)) {
+ 730              		.loc 1 358 0
+ 731 069f 8B74240C 		movl	12(%rsp), %esi
+ 732 06a3 31C0     		xorl	%eax, %eax
+ 733 06a5 41B81300 		movl	$19, %r8d
+ 733      0000
+ 734 06ab B9100000 		movl	$16, %ecx
+ 734      00
+ 735 06b0 BA040000 		movl	$4, %edx
+ 735      00
+ 736 06b5 4C89EF   		movq	%r13, %rdi
+ 737 06b8 E843F9FF 		call	path_equal
+ 737      FF
+ 738              	.LVL87:
+ 739 06bd 84C0     		testb	%al, %al
+ 740 06bf 4188C7   		movb	%al, %r15b
+ 741 06c2 742B     		je	.L62
+ 742              	.LVL88:
+ 743              	.LBB60:
+ 359:targets.c     **** 			ctx->version = get_num(data);
+ 744              		.loc 1 359 0
+ 745 06c4 31C0     		xorl	%eax, %eax
+ 746 06c6 4889DF   		movq	%rbx, %rdi
+ 747              	.LVL89:
+ 748 06c9 E8000000 		call	get_num
+ 748      00
+ 749              	.LVL90:
+ 360:targets.c     **** 			if(ctx->version < ctx->version_prev) {
+ 750              		.loc 1 360 0
+ 751 06ce 413B06   		cmpl	(%r14), %eax
+ 359:targets.c     **** 			ctx->version = get_num(data);
+ 752              		.loc 1 359 0
+ 753 06d1 41894668 		movl	%eax, 104(%r14)
+ 754              		.loc 1 360 0
+ 755 06d5 7D0D     		jge	.L63
+ 361:targets.c     **** 				ctx->res = TARGETS_DOWNGRADE;
+ 756              		.loc 1 361 0
+ 757 06d7 41C74670 		movl	$12, 112(%r14)
+ 757      0C000000 
+ 758 06df E91E0300 		jmp	.L20
+ 758      00
+ 759              	.L63:
+ 362:targets.c     **** 				return true;
+ 363:targets.c     **** 			}
+ 364:targets.c     **** 			ctx->version_checked = true;
+ 760              		.loc 1 364 0
+ 761 06e4 41C68684 		movb	$1, 132(%r14)
+ 761      00000001 
+ 762              	.LVL91:
+GAS LISTING /tmp/ccO1TY4U.s 			page 25
+
+
+ 365:targets.c     **** 			success = true;
+ 763              		.loc 1 365 0
+ 764 06ec 4588FC   		movb	%r15b, %r12b
+ 765              	.LVL92:
+ 766              	.L62:
+ 767              	.LBE60:
+ 366:targets.c     **** 		}
+ 367:targets.c     **** 
+ 368:targets.c     **** 		if(path_equal(path, path_len, KEY_SIGNED, KEY_ANY, KEY_CUSTOM, KEY_ECU_IDENTIFIER, KEY_NUMBER)) {
+ 768              		.loc 1 368 0
+ 769 06ef 4883EC08 		subq	$8, %rsp
+ 770              		.cfi_def_cfa_offset 136
+ 771 06f3 41B90900 		movl	$9, %r9d
+ 771      0000
+ 772 06f9 41B80800 		movl	$8, %r8d
+ 772      0000
+ 773 06ff 6A13     		pushq	$19
+ 774              		.cfi_def_cfa_offset 144
+ 775 0701 8B74241C 		movl	28(%rsp), %esi
+ 776 0705 31C0     		xorl	%eax, %eax
+ 777 0707 B9110000 		movl	$17, %ecx
+ 777      00
+ 778 070c BA040000 		movl	$4, %edx
+ 778      00
+ 779 0711 4C89EF   		movq	%r13, %rdi
+ 780 0714 E8E7F8FF 		call	path_equal
+ 780      FF
+ 781              	.LVL93:
+ 782 0719 84C0     		testb	%al, %al
+ 783 071b 4188C7   		movb	%al, %r15b
+ 784 071e 4158     		popq	%r8
+ 785              		.cfi_def_cfa_offset 136
+ 786 0720 4159     		popq	%r9
+ 787              		.cfi_def_cfa_offset 128
+ 788 0722 741A     		je	.L96
+ 789              	.LVL94:
+ 369:targets.c     **** 			if(!strcmp(ctx->ecu_id, data))
+ 790              		.loc 1 369 0
+ 791 0724 498B7E18 		movq	24(%r14), %rdi
+ 792              	.LVL95:
+ 793 0728 4889DE   		movq	%rbx, %rsi
+ 794 072b E8000000 		call	strcmp
+ 794      00
+ 795              	.LVL96:
+ 796 0730 85C0     		testl	%eax, %eax
+ 797 0732 750D     		jne	.L64
+ 370:targets.c     **** 				ctx->ecuid_matches = true;
+ 798              		.loc 1 370 0
+ 799 0734 41C686AD 		movb	$1, 173(%r14)
+ 799      00000001 
+ 800 073c EB03     		jmp	.L64
+ 801              	.LVL97:
+ 802              	.L96:
+ 368:targets.c     **** 			if(!strcmp(ctx->ecu_id, data))
+ 803              		.loc 1 368 0
+ 804 073e 4588E7   		movb	%r12b, %r15b
+ 805              	.LVL98:
+GAS LISTING /tmp/ccO1TY4U.s 			page 26
+
+
+ 806              	.L64:
+ 371:targets.c     **** 			success = true;
+ 372:targets.c     **** 		}
+ 373:targets.c     **** 		if(path_equal(path, path_len, KEY_SIGNED, KEY_ANY, KEY_CUSTOM, KEY_HARDWARE_IDENTIFIER, KEY_NUMBE
+ 807              		.loc 1 373 0
+ 808 0741 4883EC08 		subq	$8, %rsp
+ 809              		.cfi_def_cfa_offset 136
+ 810 0745 4C89EF   		movq	%r13, %rdi
+ 811 0748 31C0     		xorl	%eax, %eax
+ 812 074a 6A13     		pushq	$19
+ 813              		.cfi_def_cfa_offset 144
+ 814 074c 8B74241C 		movl	28(%rsp), %esi
+ 815 0750 41B90A00 		movl	$10, %r9d
+ 815      0000
+ 816 0756 41B80800 		movl	$8, %r8d
+ 816      0000
+ 817 075c B9110000 		movl	$17, %ecx
+ 817      00
+ 818 0761 BA040000 		movl	$4, %edx
+ 818      00
+ 819 0766 E895F8FF 		call	path_equal
+ 819      FF
+ 820              	.LVL99:
+ 821 076b 84C0     		testb	%al, %al
+ 822 076d 4188C4   		movb	%al, %r12b
+ 823 0770 5E       		popq	%rsi
+ 824              		.cfi_def_cfa_offset 136
+ 825 0771 5F       		popq	%rdi
+ 826              		.cfi_def_cfa_offset 128
+ 827 0772 741A     		je	.L97
+ 374:targets.c     **** 			if(!strcmp(ctx->hardware_id, data))
+ 828              		.loc 1 374 0
+ 829 0774 498B7E20 		movq	32(%r14), %rdi
+ 830 0778 4889DE   		movq	%rbx, %rsi
+ 831 077b E8000000 		call	strcmp
+ 831      00
+ 832              	.LVL100:
+ 833 0780 85C0     		testl	%eax, %eax
+ 834 0782 750D     		jne	.L65
+ 375:targets.c     **** 				ctx->hardwareid_matches = true;
+ 835              		.loc 1 375 0
+ 836 0784 41C686AE 		movb	$1, 174(%r14)
+ 836      00000001 
+ 837 078c EB03     		jmp	.L65
+ 838              	.L97:
+ 373:targets.c     **** 			if(!strcmp(ctx->hardware_id, data))
+ 839              		.loc 1 373 0
+ 840 078e 4588FC   		movb	%r15b, %r12b
+ 841              	.L65:
+ 842              	.LVL101:
+ 376:targets.c     **** 			success = true;
+ 377:targets.c     **** 		}
+ 378:targets.c     **** 		if(path_equal(path, path_len, KEY_SIGNED, KEY_ANY, KEY_HASHES, KEY_SHA512, KEY_NUMBER)) {
+ 843              		.loc 1 378 0
+ 844 0791 4883EC08 		subq	$8, %rsp
+ 845              		.cfi_def_cfa_offset 136
+ 846 0795 B9110000 		movl	$17, %ecx
+GAS LISTING /tmp/ccO1TY4U.s 			page 27
+
+
+ 846      00
+ 847 079a BA040000 		movl	$4, %edx
+ 847      00
+ 848 079f 6A13     		pushq	$19
+ 849              		.cfi_def_cfa_offset 144
+ 850 07a1 8B74241C 		movl	28(%rsp), %esi
+ 851 07a5 31C0     		xorl	%eax, %eax
+ 852 07a7 41B90E00 		movl	$14, %r9d
+ 852      0000
+ 853 07ad 41B80C00 		movl	$12, %r8d
+ 853      0000
+ 854 07b3 4C89EF   		movq	%r13, %rdi
+ 855 07b6 E845F8FF 		call	path_equal
+ 855      FF
+ 856              	.LVL102:
+ 857 07bb 84C0     		testb	%al, %al
+ 858 07bd 5A       		popq	%rdx
+ 859              		.cfi_def_cfa_offset 136
+ 860 07be 59       		popq	%rcx
+ 861              		.cfi_def_cfa_offset 128
+ 862 07bf 7455     		je	.L66
+ 863              	.LVL103:
+ 379:targets.c     **** 			if(ctx->ecuid_matches && ctx->hardwareid_matches) {
+ 864              		.loc 1 379 0
+ 865 07c1 458AA6AD 		movb	173(%r14), %r12b
+ 865      000000
+ 866              	.LVL104:
+ 867 07c8 4584E4   		testb	%r12b, %r12b
+ 868 07cb 7446     		je	.L98
+ 869 07cd 458ABEAE 		movb	174(%r14), %r15b
+ 869      000000
+ 870 07d4 4584FF   		testb	%r15b, %r15b
+ 871 07d7 743D     		je	.L66
+ 872 07d9 4531E4   		xorl	%r12d, %r12d
+ 873              	.LVL105:
+ 874              	.L67:
+ 875              	.LBB61:
+ 876              	.LBB62:
+ 380:targets.c     **** 				int i;
+ 381:targets.c     **** 				for(i = 0; i < SHA512_HASH_SIZE; i++)
+ 382:targets.c     **** 					ctx->sha512_hash[i] = hex(data[i << 1], data[1+ (i << i)]);
+ 877              		.loc 1 382 0
+ 878 07dc 4488E1   		movb	%r12b, %cl
+ 879 07df 4489E0   		movl	%r12d, %eax
+ 880 07e2 420FB63C 		movzbl	(%rbx,%r12,2), %edi
+ 880      63
+ 881 07e7 D3E0     		sall	%cl, %eax
+ 882 07e9 FFC0     		incl	%eax
+ 883 07eb 4898     		cltq
+ 884 07ed 0FB63403 		movzbl	(%rbx,%rax), %esi
+ 885 07f1 31C0     		xorl	%eax, %eax
+ 886 07f3 E8000000 		call	hex
+ 886      00
+ 887              	.LVL106:
+ 888 07f8 43884426 		movb	%al, 40(%r14,%r12)
+ 888      28
+ 889              	.LVL107:
+GAS LISTING /tmp/ccO1TY4U.s 			page 28
+
+
+ 890 07fd 49FFC4   		incq	%r12
+ 891              	.LVL108:
+ 892              	.LBE62:
+ 381:targets.c     **** 					ctx->sha512_hash[i] = hex(data[i << 1], data[1+ (i << i)]);
+ 893              		.loc 1 381 0
+ 894 0800 4983FC40 		cmpq	$64, %r12
+ 895 0804 75D6     		jne	.L67
+ 383:targets.c     **** 				ctx->hash_found = true;
+ 896              		.loc 1 383 0
+ 897 0806 41C686AF 		movb	$1, 175(%r14)
+ 897      00000001 
+ 898              	.LBE61:
+ 384:targets.c     **** 			}
+ 385:targets.c     **** 			success = true;
+ 899              		.loc 1 385 0
+ 900 080e 4588FC   		movb	%r15b, %r12b
+ 901 0811 EB03     		jmp	.L66
+ 902              	.LVL109:
+ 903              	.L98:
+ 904 0813 4188C4   		movb	%al, %r12b
+ 905              	.LVL110:
+ 906              	.L66:
+ 386:targets.c     **** 		}
+ 387:targets.c     **** 		if(path_equal(path, path_len, KEY_SIGNED, KEY_ANY, KEY_LENGTH, KEY_NUMBER)) {
+ 907              		.loc 1 387 0
+ 908 0816 8B74240C 		movl	12(%rsp), %esi
+ 909 081a 31C0     		xorl	%eax, %eax
+ 910 081c 41B91300 		movl	$19, %r9d
+ 910      0000
+ 911 0822 41B80F00 		movl	$15, %r8d
+ 911      0000
+ 912 0828 B9110000 		movl	$17, %ecx
+ 912      00
+ 913 082d BA040000 		movl	$4, %edx
+ 913      00
+ 914 0832 4C89EF   		movq	%r13, %rdi
+ 915 0835 E8C6F7FF 		call	path_equal
+ 915      FF
+ 916              	.LVL111:
+ 917 083a 84C0     		testb	%al, %al
+ 918 083c 742C     		je	.L68
+ 919              	.LVL112:
+ 388:targets.c     **** 			if(ctx->ecuid_matches && ctx->hardwareid_matches) {
+ 920              		.loc 1 388 0
+ 921 083e 4180BEAD 		cmpb	$0, 173(%r14)
+ 921      00000000 
+ 922 0846 742B     		je	.L69
+ 923 0848 4180BEAE 		cmpb	$0, 174(%r14)
+ 923      00000000 
+ 924 0850 7421     		je	.L69
+ 925              	.LBB63:
+ 389:targets.c     **** 				ctx->length = get_num(data);
+ 926              		.loc 1 389 0
+ 927 0852 4889DF   		movq	%rbx, %rdi
+ 928              	.LVL113:
+ 929 0855 31C0     		xorl	%eax, %eax
+ 930 0857 E8000000 		call	get_num
+GAS LISTING /tmp/ccO1TY4U.s 			page 29
+
+
+ 930      00
+ 931              	.LVL114:
+ 390:targets.c     **** 				ctx->length_found = true;
+ 932              		.loc 1 390 0
+ 933 085c 41C686B0 		movb	$1, 176(%r14)
+ 933      00000001 
+ 389:targets.c     **** 				ctx->length = get_num(data);
+ 934              		.loc 1 389 0
+ 935 0864 4189466C 		movl	%eax, 108(%r14)
+ 936 0868 EB09     		jmp	.L69
+ 937              	.LVL115:
+ 938              	.L68:
+ 939              	.LBE63:
+ 391:targets.c     **** 			}
+ 392:targets.c     **** 			success = true;
+ 393:targets.c     **** 		}
+ 394:targets.c     **** 		if(!success) {
+ 940              		.loc 1 394 0
+ 941 086a 4584E4   		testb	%r12b, %r12b
+ 942 086d 0F847601 		je	.L71
+ 942      0000
+ 943              	.LVL116:
+ 944              	.L69:
+ 945              	.LBE48:
+ 395:targets.c     **** 			ctx->res = TARGETS_JSONERR;
+ 396:targets.c     **** 			return true;
+ 397:targets.c     **** 		}
+ 398:targets.c     **** 	}
+ 399:targets.c     **** 
+ 400:targets.c     **** 	/* Path logic */
+ 401:targets.c     **** 	switch(ctx->state) {
+ 946              		.loc 1 401 0
+ 947 0873 418B8680 		movl	128(%r14), %eax
+ 947      000000
+ 948 087a 83F801   		cmpl	$1, %eax
+ 949 087d 741E     		je	.L72
+ 950 087f 720E     		jb	.L73
+ 951 0881 83F802   		cmpl	$2, %eax
+ 952 0884 0F84B200 		je	.L74
+ 952      0000
+ 953 088a E95A0100 		jmp	.L71
+ 953      00
+ 954              	.L73:
+ 402:targets.c     **** 		case STATE_INIT:
+ 403:targets.c     **** 			if(ev == GJ_EVENT_OBJBEGIN) {
+ 955              		.loc 1 403 0
+ 956 088f 83FD02   		cmpl	$2, %ebp
+ 957 0892 0F855101 		jne	.L71
+ 957      0000
+ 958 0898 E9330100 		jmp	.L178
+ 958      00
+ 959              	.L72:
+ 404:targets.c     **** 				ctx->state = STATE_OBJECT;
+ 405:targets.c     **** 				return false;
+ 406:targets.c     **** 			}
+ 407:targets.c     **** 			break;
+ 408:targets.c     **** 		case STATE_OBJECT:
+GAS LISTING /tmp/ccO1TY4U.s 			page 30
+
+
+ 409:targets.c     **** 			if(ev == GJ_EVENT_OBJEND) {
+ 960              		.loc 1 409 0
+ 961 089d 83FD03   		cmpl	$3, %ebp
+ 962 08a0 7540     		jne	.L76
+ 410:targets.c     **** 				if(!ctx->path_ind) {
+ 963              		.loc 1 410 0
+ 964 08a2 418B869C 		movl	156(%r14), %eax
+ 964      000000
+ 965 08a9 85C0     		testl	%eax, %eax
+ 966 08ab 750D     		jne	.L77
+ 411:targets.c     **** 					// we should not have got here, it is processed in app;ication logic
+ 412:targets.c     **** 					ctx->res = TARGETS_INTERNAL_ERROR;
+ 967              		.loc 1 412 0
+ 968 08ad 41C74670 		movl	$4, 112(%r14)
+ 968      04000000 
+ 969 08b5 E9370100 		jmp	.L176
+ 969      00
+ 970              	.L77:
+ 413:targets.c     **** 					return true;
+ 414:targets.c     **** 				} else {
+ 415:targets.c     **** 					--ctx->path_ind;
+ 971              		.loc 1 415 0
+ 972 08ba 8D50FF   		leal	-1(%rax), %edx
+ 416:targets.c     **** 					if(ctx->path_ind && ctx->path[ctx->path_ind-1] == KEY_ARRAY) {
+ 973              		.loc 1 416 0
+ 974 08bd 85D2     		testl	%edx, %edx
+ 415:targets.c     **** 					if(ctx->path_ind && ctx->path[ctx->path_ind-1] == KEY_ARRAY) {
+ 975              		.loc 1 415 0
+ 976 08bf 4189969C 		movl	%edx, 156(%r14)
+ 976      000000
+ 977              		.loc 1 416 0
+ 978 08c6 0F841801 		je	.L175
+ 978      0000
+ 979 08cc 83E802   		subl	$2, %eax
+ 980 08cf 4898     		cltq
+ 981 08d1 4183BC86 		cmpl	$18, 136(%r14,%rax,4)
+ 981      88000000 
+ 981      12
+ 982 08da 0F850401 		jne	.L175
+ 982      0000
+ 983 08e0 EB4A     		jmp	.L177
+ 984              	.L76:
+ 417:targets.c     **** 						ctx->state = STATE_VALUE;
+ 418:targets.c     **** 					} // else state = STATE_OBJECT
+ 419:targets.c     **** 					return false;
+ 420:targets.c     **** 				}
+ 421:targets.c     **** 			} else if (ev == GJ_EVENT_KEY){
+ 985              		.loc 1 421 0
+ 986 08e2 83FD06   		cmpl	$6, %ebp
+ 987 08e5 0F85FE00 		jne	.L71
+ 987      0000
+ 988 08eb 31ED     		xorl	%ebp, %ebp
+ 989              	.LVL117:
+ 990              	.L80:
+ 991              	.LBB64:
+ 422:targets.c     **** 				int i;
+ 423:targets.c     **** 				for(i = 0; i < KEY_ANY; i++)
+GAS LISTING /tmp/ccO1TY4U.s 			page 31
+
+
+ 424:targets.c     **** 					if(!strcmp(data, targets_key_strings[i]))
+ 992              		.loc 1 424 0
+ 993 08ed 488B34ED 		movq	targets_key_strings(,%rbp,8), %rsi
+ 993      00000000 
+ 994 08f5 4889DF   		movq	%rbx, %rdi
+ 995 08f8 4189EC   		movl	%ebp, %r12d
+ 996              	.LVL118:
+ 997 08fb E8000000 		call	strcmp
+ 997      00
+ 998              	.LVL119:
+ 999 0900 85C0     		testl	%eax, %eax
+ 1000 0902 740F     		je	.L79
+ 1001              	.LVL120:
+ 1002 0904 48FFC5   		incq	%rbp
+ 1003              	.LVL121:
+ 423:targets.c     **** 					if(!strcmp(data, targets_key_strings[i]))
+ 1004              		.loc 1 423 0
+ 1005 0907 4883FD11 		cmpq	$17, %rbp
+ 1006 090b 75E0     		jne	.L80
+ 1007 090d 41BC1100 		movl	$17, %r12d
+ 1007      0000
+ 1008              	.LVL122:
+ 1009              	.L79:
+ 425:targets.c     **** 						break;
+ 426:targets.c     **** 				// path entry is set to KEY_ANY if string is not found
+ 427:targets.c     **** 				ctx->path[ctx->path_ind++] = i;
+ 1010              		.loc 1 427 0
+ 1011 0913 4963869C 		movslq	156(%r14), %rax
+ 1011      000000
+ 1012 091a 8D5001   		leal	1(%rax), %edx
+ 1013 091d 4189969C 		movl	%edx, 156(%r14)
+ 1013      000000
+ 1014 0924 4589A486 		movl	%r12d, 136(%r14,%rax,4)
+ 1014      88000000 
+ 1015              	.L177:
+ 428:targets.c     **** 				ctx->state = STATE_VALUE;
+ 1016              		.loc 1 428 0
+ 1017 092c 41C78680 		movl	$2, 128(%r14)
+ 1017      00000002 
+ 1017      000000
+ 1018 0937 E9A80000 		jmp	.L175
+ 1018      00
+ 1019              	.LVL123:
+ 1020              	.L74:
+ 1021              	.LBE64:
+ 429:targets.c     **** 				return false;
+ 430:targets.c     **** 			}
+ 431:targets.c     **** 			break;
+ 432:targets.c     **** 		case STATE_VALUE:
+ 433:targets.c     **** 			if(ev == GJ_EVENT_OBJBEGIN) {
+ 1022              		.loc 1 433 0
+ 1023 093c 83FD02   		cmpl	$2, %ebp
+ 1024 093f 0F848B00 		je	.L178
+ 1024      0000
+ 434:targets.c     **** 				ctx->state = STATE_OBJECT;
+ 435:targets.c     **** 				return false;
+ 436:targets.c     **** 			} else if(ev == GJ_EVENT_ARRBEGIN) {
+GAS LISTING /tmp/ccO1TY4U.s 			page 32
+
+
+ 1025              		.loc 1 436 0
+ 1026 0945 83FD04   		cmpl	$4, %ebp
+ 1027 0948 751F     		jne	.L81
+ 437:targets.c     **** 				ctx->path[ctx->path_ind++] = KEY_ARRAY;
+ 1028              		.loc 1 437 0
+ 1029 094a 4963869C 		movslq	156(%r14), %rax
+ 1029      000000
+ 1030 0951 8D5001   		leal	1(%rax), %edx
+ 1031 0954 4189969C 		movl	%edx, 156(%r14)
+ 1031      000000
+ 1032 095b 41C78486 		movl	$18, 136(%r14,%rax,4)
+ 1032      88000000 
+ 1032      12000000 
+ 1033 0967 EB7B     		jmp	.L175
+ 1034              	.L81:
+ 438:targets.c     **** 				return false;
+ 439:targets.c     **** 			} else if(ev == GJ_EVENT_ARREND) {
+ 1035              		.loc 1 439 0
+ 1036 0969 83FD05   		cmpl	$5, %ebp
+ 1037 096c 752D     		jne	.L82
+ 440:targets.c     **** 				if(ctx->path[--ctx->path_ind] == KEY_ARRAY) {
+ 1038              		.loc 1 440 0
+ 1039 096e 4963869C 		movslq	156(%r14), %rax
+ 1039      000000
+ 1040 0975 8D50FF   		leal	-1(%rax), %edx
+ 1041 0978 498D0486 		leaq	(%r14,%rax,4), %rax
+ 1042 097c 4189969C 		movl	%edx, 156(%r14)
+ 1042      000000
+ 1043 0983 83B88400 		cmpl	$18, 132(%rax)
+ 1043      000012
+ 1044 098a 755D     		jne	.L71
+ 441:targets.c     **** 					if(!ctx->path_ind || ctx->path[ctx->path_ind-1] != KEY_ARRAY) {
+ 1045              		.loc 1 441 0
+ 1046 098c 85D2     		testl	%edx, %edx
+ 1047 098e 7440     		je	.L178
+ 1048 0990 83B88000 		cmpl	$18, 128(%rax)
+ 1048      000012
+ 1049 0997 7537     		jne	.L178
+ 1050 0999 EB49     		jmp	.L175
+ 1051              	.L82:
+ 442:targets.c     **** 						ctx->state = STATE_OBJECT;
+ 443:targets.c     **** 					} /* else state = STATE_VALUE */
+ 444:targets.c     **** 					return false;
+ 445:targets.c     **** 				}
+ 446:targets.c     **** 			} else if (ev >= GJ_EVENT_STRING && ev <= GJ_EVENT_NUMBER) {
+ 1052              		.loc 1 446 0
+ 1053 099b 837C2418 		cmpl	$2, 24(%rsp)
+ 1053      02
+ 1054 09a0 7747     		ja	.L71
+ 447:targets.c     **** 				if(ctx->path[ctx->path_ind-1] == KEY_ARRAY) {
+ 1055              		.loc 1 447 0
+ 1056 09a2 49638E9C 		movslq	156(%r14), %rcx
+ 1056      000000
+ 1057 09a9 4889C8   		movq	%rcx, %rax
+ 1058 09ac 8D51FF   		leal	-1(%rcx), %edx
+ 1059 09af 498D0C8E 		leaq	(%r14,%rcx,4), %rcx
+ 1060 09b3 83B98400 		cmpl	$18, 132(%rcx)
+GAS LISTING /tmp/ccO1TY4U.s 			page 33
+
+
+ 1060      000012
+ 1061 09ba 7428     		je	.L175
+ 448:targets.c     **** 					// just another value in array, value expected
+ 449:targets.c     **** 					return false;
+ 450:targets.c     **** 				} else if(ctx->path_ind == 1 || ctx->path[ctx->path_ind-2] != KEY_ARRAY) {
+ 1062              		.loc 1 450 0
+ 1063 09bc FFC8     		decl	%eax
+ 1064 09be 7409     		je	.L83
+ 1065 09c0 83B98000 		cmpl	$18, 128(%rcx)
+ 1065      000012
+ 1066 09c7 7414     		je	.L84
+ 1067              	.L83:
+ 451:targets.c     **** 					// exited key:value pair, occured in an object
+ 452:targets.c     **** 					ctx->path_ind--;
+ 1068              		.loc 1 452 0
+ 1069 09c9 4189969C 		movl	%edx, 156(%r14)
+ 1069      000000
+ 1070              	.L178:
+ 453:targets.c     **** 					ctx->state = STATE_OBJECT;
+ 1071              		.loc 1 453 0
+ 1072 09d0 41C78680 		movl	$1, 128(%r14)
+ 1072      00000001 
+ 1072      000000
+ 1073 09db EB07     		jmp	.L175
+ 1074              	.L84:
+ 454:targets.c     **** 					return false;
+ 455:targets.c     **** 				} else {
+ 456:targets.c     **** 					// exited key:value pair, occured in an array
+ 457:targets.c     **** 					ctx->path_ind--;
+ 1075              		.loc 1 457 0
+ 1076 09dd 4189969C 		movl	%edx, 156(%r14)
+ 1076      000000
+ 1077              	.LVL124:
+ 1078              	.L175:
+ 458:targets.c     **** 					return false;
+ 1079              		.loc 1 458 0
+ 1080 09e4 4531FF   		xorl	%r15d, %r15d
+ 1081 09e7 EB19     		jmp	.L20
+ 1082              	.L71:
+ 459:targets.c     **** 				}
+ 460:targets.c     **** 			}
+ 461:targets.c     **** 	}
+ 462:targets.c     **** 	/* We haven't returned successfully yet => JSON is broken*/
+ 463:targets.c     **** 	ctx->res = TARGETS_JSONERR;
+ 1083              		.loc 1 463 0
+ 1084 09e9 41C74670 		movl	$9, 112(%r14)
+ 1084      09000000 
+ 1085              	.L176:
+ 464:targets.c     **** 	return true;
+ 1086              		.loc 1 464 0
+ 1087 09f1 41B701   		movb	$1, %r15b
+ 1088 09f4 EB0C     		jmp	.L20
+ 1089              	.LVL125:
+ 1090              	.L31:
+ 322:targets.c     **** 		/* Only some of the path->value combinations are valid. If success was not
+ 1091              		.loc 1 322 0
+ 1092 09f6 8D45F9   		leal	-7(%rbp), %eax
+GAS LISTING /tmp/ccO1TY4U.s 			page 34
+
+
+ 1093 09f9 89442418 		movl	%eax, 24(%rsp)
+ 1094 09fd E971FEFF 		jmp	.L69
+ 1094      FF
+ 1095              	.LVL126:
+ 1096              	.L20:
+ 1097              	.LBE43:
+ 1098              	.LBE42:
+ 465:targets.c     **** }
+ 1099              		.loc 1 465 0
+ 1100 0a02 4883C448 		addq	$72, %rsp
+ 1101              		.cfi_def_cfa_offset 56
+ 1102 0a06 4488F8   		movb	%r15b, %al
+ 1103 0a09 5B       		popq	%rbx
+ 1104              		.cfi_def_cfa_offset 48
+ 1105 0a0a 5D       		popq	%rbp
+ 1106              		.cfi_def_cfa_offset 40
+ 1107 0a0b 415C     		popq	%r12
+ 1108              		.cfi_def_cfa_offset 32
+ 1109 0a0d 415D     		popq	%r13
+ 1110              		.cfi_def_cfa_offset 24
+ 1111 0a0f 415E     		popq	%r14
+ 1112              		.cfi_def_cfa_offset 16
+ 1113              	.LVL127:
+ 1114 0a11 415F     		popq	%r15
+ 1115              		.cfi_def_cfa_offset 8
+ 1116 0a13 C3       		ret
+ 1117              		.cfi_endproc
+ 1118              	.LFE10:
+ 1120              		.globl	targets_ctx_new
+ 1122              	targets_ctx_new:
+ 1123              	.LFB3:
+  98:targets.c     **** #ifdef CONFIG_UPTANE_NOMALLOC
+ 1124              		.loc 1 98 0
+ 1125              		.cfi_startproc
+ 1126              	.LVL128:
+ 104:targets.c     **** 	return NULL;
+ 1127              		.loc 1 104 0
+ 1128 0a14 803D0000 		cmpb	$0, targets_ctx_busy(%rip)
+ 1128      000000
+ 1129 0a1b BA000000 		movl	$0, %edx
+ 1129      00
+ 1130 0a20 B8000000 		movl	$targets_ctxs, %eax
+ 1130      00
+ 1131 0a25 480F45C2 		cmovne	%rdx, %rax
+ 110:targets.c     **** 
+ 1132              		.loc 1 110 0
+ 1133 0a29 C3       		ret
+ 1134              		.cfi_endproc
+ 1135              	.LFE3:
+ 1137              		.globl	targets_ctx_free
+ 1139              	targets_ctx_free:
+ 1140              	.LFB4:
+ 112:targets.c     **** 	int i;
+ 1141              		.loc 1 112 0
+ 1142              		.cfi_startproc
+ 1143              	.LVL129:
+ 115:targets.c     **** #endif
+GAS LISTING /tmp/ccO1TY4U.s 			page 35
+
+
+ 1144              		.loc 1 115 0
+ 1145 0a2a 4889F8   		movq	%rdi, %rax
+ 1146 0a2d B9C80000 		movl	$200, %ecx
+ 1146      00
+ 1147 0a32 31D2     		xorl	%edx, %edx
+ 1148 0a34 482D0000 		subq	$targets_ctxs, %rax
+ 1148      0000
+ 112:targets.c     **** 	int i;
+ 1149              		.loc 1 112 0
+ 1150 0a3a 4154     		pushq	%r12
+ 1151              		.cfi_def_cfa_offset 16
+ 1152              		.cfi_offset 12, -16
+ 1153 0a3c 55       		pushq	%rbp
+ 1154              		.cfi_def_cfa_offset 24
+ 1155              		.cfi_offset 6, -24
+ 115:targets.c     **** #endif
+ 1156              		.loc 1 115 0
+ 1157 0a3d 48F7F1   		divq	%rcx
+ 112:targets.c     **** 	int i;
+ 1158              		.loc 1 112 0
+ 1159 0a40 53       		pushq	%rbx
+ 1160              		.cfi_def_cfa_offset 32
+ 1161              		.cfi_offset 3, -32
+ 112:targets.c     **** 	int i;
+ 1162              		.loc 1 112 0
+ 1163 0a41 4889FD   		movq	%rdi, %rbp
+ 118:targets.c     **** 
+ 1164              		.loc 1 118 0
+ 1165 0a44 488B7F78 		movq	120(%rdi), %rdi
+ 1166              	.LVL130:
+ 120:targets.c     **** 		if(ctx->sigvalid[i])
+ 1167              		.loc 1 120 0
+ 1168 0a48 31DB     		xorl	%ebx, %ebx
+ 115:targets.c     **** #endif
+ 1169              		.loc 1 115 0
+ 1170 0a4a 4989C4   		movq	%rax, %r12
+ 1171              	.LVL131:
+ 118:targets.c     **** 
+ 1172              		.loc 1 118 0
+ 1173 0a4d E8000000 		call	gj_ctx_free
+ 1173      00
+ 1174              	.LVL132:
+ 1175              	.L185:
+ 120:targets.c     **** 		if(ctx->sigvalid[i])
+ 1176              		.loc 1 120 0 discriminator 1
+ 1177 0a52 395D10   		cmpl	%ebx, 16(%rbp)
+ 1178 0a55 7E1C     		jle	.L189
+ 121:targets.c     **** 			crypto_verify_ctx_free(ctx->sig_ctxs[i]);
+ 1179              		.loc 1 121 0
+ 1180 0a57 80BC1DAC 		cmpb	$0, 172(%rbp,%rbx)
+ 1180      00000000 
+ 1181 0a5f 740D     		je	.L186
+ 122:targets.c     **** 
+ 1182              		.loc 1 122 0
+ 1183 0a61 488BBCDD 		movq	184(%rbp,%rbx,8), %rdi
+ 1183      B8000000 
+ 1184 0a69 E8000000 		call	crypto_verify_ctx_free
+GAS LISTING /tmp/ccO1TY4U.s 			page 36
+
+
+ 1184      00
+ 1185              	.LVL133:
+ 1186              	.L186:
+ 1187 0a6e 48FFC3   		incq	%rbx
+ 1188              	.LVL134:
+ 1189 0a71 EBDF     		jmp	.L185
+ 1190              	.LVL135:
+ 1191              	.L189:
+ 129:targets.c     **** 
+ 1192              		.loc 1 129 0
+ 1193 0a73 5B       		popq	%rbx
+ 1194              		.cfi_def_cfa_offset 24
+ 1195              	.LVL136:
+ 125:targets.c     **** #else
+ 1196              		.loc 1 125 0
+ 1197 0a74 41C68424 		movb	$0, targets_ctx_busy(%r12)
+ 1197      00000000 
+ 1197      00
+ 129:targets.c     **** 
+ 1198              		.loc 1 129 0
+ 1199 0a7d 5D       		popq	%rbp
+ 1200              		.cfi_def_cfa_offset 16
+ 1201              	.LVL137:
+ 1202 0a7e 415C     		popq	%r12
+ 1203              		.cfi_def_cfa_offset 8
+ 1204              	.LVL138:
+ 1205 0a80 C3       		ret
+ 1206              		.cfi_endproc
+ 1207              	.LFE4:
+ 1209              		.globl	targets_init
+ 1211              	targets_init:
+ 1212              	.LFB11:
+ 466:targets.c     **** 
+ 467:targets.c     **** void targets_init(targets_ctx_t* ctx, int version_prev, uint32_t time,
+ 468:targets.c     **** 		  const crypto_key_t* keys, int key_num, int threshold) {
+ 1213              		.loc 1 468 0
+ 1214              		.cfi_startproc
+ 1215              	.LVL139:
+ 1216 0a81 55       		pushq	%rbp
+ 1217              		.cfi_def_cfa_offset 16
+ 1218              		.cfi_offset 6, -16
+ 1219 0a82 53       		pushq	%rbx
+ 1220              		.cfi_def_cfa_offset 24
+ 1221              		.cfi_offset 3, -24
+ 469:targets.c     **** 	int i;
+ 470:targets.c     **** 
+ 471:targets.c     **** 	ctx->version_prev = version_prev;
+ 472:targets.c     **** 	ctx->time = time;
+ 473:targets.c     **** 	for (i = 0; i < key_num; i++) {
+ 1222              		.loc 1 473 0
+ 1223 0a83 31C0     		xorl	%eax, %eax
+ 468:targets.c     **** 	int i;
+ 1224              		.loc 1 468 0
+ 1225 0a85 4889FB   		movq	%rdi, %rbx
+ 1226 0a88 4883EC18 		subq	$24, %rsp
+ 1227              		.cfi_def_cfa_offset 48
+ 1228              		.loc 1 473 0
+GAS LISTING /tmp/ccO1TY4U.s 			page 37
+
+
+ 1229 0a8c 4585C0   		testl	%r8d, %r8d
+ 471:targets.c     **** 	ctx->time = time;
+ 1230              		.loc 1 471 0
+ 1231 0a8f 8937     		movl	%esi, (%rdi)
+ 472:targets.c     **** 	for (i = 0; i < key_num; i++) {
+ 1232              		.loc 1 472 0
+ 1233 0a91 895704   		movl	%edx, 4(%rdi)
+ 1234              	.LVL140:
+ 1235              		.loc 1 473 0
+ 1236 0a94 7E27     		jle	.L191
+ 1237 0a96 4889CD   		movq	%rcx, %rbp
+ 1238 0a99 44894C24 		movl	%r9d, 12(%rsp)
+ 1238      0C
+ 1239              	.LBB65:
+ 474:targets.c     **** 		if(i >= CONFIG_UPTANE_TARGETS_MAX_SIGS)
+ 475:targets.c     **** 			break;
+ 476:targets.c     **** 		ctx->sigs[i] = new_sig();
+ 1240              		.loc 1 476 0
+ 1241 0a9e E8000000 		call	new_sig
+ 1241      00
+ 1242              	.LVL141:
+ 1243              	.LBE65:
+ 473:targets.c     **** 		if(i >= CONFIG_UPTANE_TARGETS_MAX_SIGS)
+ 1244              		.loc 1 473 0
+ 1245 0aa3 448B4C24 		movl	12(%rsp), %r9d
+ 1245      0C
+ 1246              	.LBB66:
+ 1247              		.loc 1 476 0
+ 1248 0aa8 4898     		cltq
+ 1249 0aaa 48894308 		movq	%rax, 8(%rbx)
+ 477:targets.c     **** 		ctx->sigs[i]->key = &keys[i];
+ 1250              		.loc 1 477 0
+ 1251 0aae 488928   		movq	%rbp, (%rax)
+ 1252              	.LBE66:
+ 473:targets.c     **** 		if(i >= CONFIG_UPTANE_TARGETS_MAX_SIGS)
+ 1253              		.loc 1 473 0
+ 1254 0ab1 B8010000 		movl	$1, %eax
+ 1254      00
+ 1255              	.LBB67:
+ 478:targets.c     **** 		ctx->sigvalid[i] = false;
+ 1256              		.loc 1 478 0
+ 1257 0ab6 C683AC00 		movb	$0, 172(%rbx)
+ 1257      000000
+ 1258              	.LVL142:
+ 1259              	.L191:
+ 1260              	.LBE67:
+ 479:targets.c     **** 	}
+ 480:targets.c     **** 	ctx->num_keys = i;
+ 1261              		.loc 1 480 0
+ 1262 0abd 894310   		movl	%eax, 16(%rbx)
+ 481:targets.c     **** 	ctx->sigs_found = 0;
+ 482:targets.c     **** 
+ 483:targets.c     **** 	ctx->threshold = threshold;
+ 1263              		.loc 1 483 0
+ 1264 0ac0 44894B14 		movl	%r9d, 20(%rbx)
+ 484:targets.c     **** 	ctx->state = STATE_INIT;
+ 485:targets.c     **** 	ctx->json_ctx = gj_ctx_new();
+GAS LISTING /tmp/ccO1TY4U.s 			page 38
+
+
+ 1265              		.loc 1 485 0
+ 1266 0ac4 31C0     		xorl	%eax, %eax
+ 481:targets.c     **** 	ctx->sigs_found = 0;
+ 1267              		.loc 1 481 0
+ 1268 0ac6 C783A800 		movl	$0, 168(%rbx)
+ 1268      00000000 
+ 1268      0000
+ 484:targets.c     **** 	ctx->state = STATE_INIT;
+ 1269              		.loc 1 484 0
+ 1270 0ad0 C7838000 		movl	$0, 128(%rbx)
+ 1270      00000000 
+ 1270      0000
+ 1271              		.loc 1 485 0
+ 1272 0ada E8000000 		call	gj_ctx_new
+ 1272      00
+ 1273              	.LVL143:
+ 486:targets.c     **** 	gj_init(ctx->json_ctx, targets_json_handler, ctx);
+ 1274              		.loc 1 486 0
+ 1275 0adf 4889DA   		movq	%rbx, %rdx
+ 485:targets.c     **** 	gj_init(ctx->json_ctx, targets_json_handler, ctx);
+ 1276              		.loc 1 485 0
+ 1277 0ae2 48894378 		movq	%rax, 120(%rbx)
+ 1278              		.loc 1 486 0
+ 1279 0ae6 BE000000 		movl	$targets_json_handler, %esi
+ 1279      00
+ 1280 0aeb 4889C7   		movq	%rax, %rdi
+ 1281 0aee E8000000 		call	gj_init
+ 1281      00
+ 1282              	.LVL144:
+ 487:targets.c     **** 
+ 488:targets.c     **** 	ctx->version_checked = ctx->time_checked = ctx->signatures_checked = false;
+ 1283              		.loc 1 488 0
+ 1284 0af3 C6838600 		movb	$0, 134(%rbx)
+ 1284      000000
+ 1285 0afa C6838500 		movb	$0, 133(%rbx)
+ 1285      000000
+ 1286 0b01 C6838400 		movb	$0, 132(%rbx)
+ 1286      000000
+ 489:targets.c     **** 	ctx->path_ind = 0;
+ 1287              		.loc 1 489 0
+ 1288 0b08 C7839C00 		movl	$0, 156(%rbx)
+ 1288      00000000 
+ 1288      0000
+ 490:targets.c     **** 			
+ 491:targets.c     **** 	ctx->hash_found = false;
+ 1289              		.loc 1 491 0
+ 1290 0b12 C683AF00 		movb	$0, 175(%rbx)
+ 1290      000000
+ 492:targets.c     **** 	ctx->length_found = false;
+ 1291              		.loc 1 492 0
+ 1292 0b19 C683B000 		movb	$0, 176(%rbx)
+ 1292      000000
+ 493:targets.c     **** 
+ 494:targets.c     **** 	ctx->in_signed = false;
+ 1293              		.loc 1 494 0
+ 1294 0b20 C683C000 		movb	$0, 192(%rbx)
+ 1294      000000
+GAS LISTING /tmp/ccO1TY4U.s 			page 39
+
+
+ 495:targets.c     **** }
+ 1295              		.loc 1 495 0
+ 1296 0b27 4883C418 		addq	$24, %rsp
+ 1297              		.cfi_def_cfa_offset 24
+ 1298 0b2b 5B       		popq	%rbx
+ 1299              		.cfi_def_cfa_offset 16
+ 1300              	.LVL145:
+ 1301 0b2c 5D       		popq	%rbp
+ 1302              		.cfi_def_cfa_offset 8
+ 1303 0b2d C3       		ret
+ 1304              		.cfi_endproc
+ 1305              	.LFE11:
+ 1307              		.globl	targets_process
+ 1309              	targets_process:
+ 1310              	.LFB12:
+ 496:targets.c     **** 
+ 497:targets.c     **** 
+ 498:targets.c     **** bool targets_process(targets_ctx_t* ctx, const uint8_t* data, size_t len) {
+ 1311              		.loc 1 498 0
+ 1312              		.cfi_startproc
+ 1313              	.LVL146:
+ 499:targets.c     **** 	return gj_process(ctx->json_ctx, data, len);
+ 1314              		.loc 1 499 0
+ 1315 0b2e 488B7F78 		movq	120(%rdi), %rdi
+ 1316              	.LVL147:
+ 1317 0b32 E9000000 		jmp	gj_process
+ 1317      00
+ 1318              	.LVL148:
+ 1319              		.cfi_endproc
+ 1320              	.LFE12:
+ 1322              		.globl	targets_get_result
+ 1324              	targets_get_result:
+ 1325              	.LFB13:
+ 500:targets.c     **** }
+ 501:targets.c     **** 
+ 502:targets.c     **** targets_result_t targets_get_result(const targets_ctx_t* ctx, uint8_t* sha512_hash, int* length, in
+ 1326              		.loc 1 502 0
+ 1327              		.cfi_startproc
+ 1328              	.LVL149:
+ 1329              		.loc 1 502 0
+ 1330 0b37 4989F0   		movq	%rsi, %r8
+ 1331 0b3a 4889F8   		movq	%rdi, %rax
+ 1332 0b3d 4989C9   		movq	%rcx, %r9
+ 503:targets.c     **** 	memcpy(sha512_hash, ctx->sha512_hash, SHA512_HASH_SIZE);
+ 1333              		.loc 1 503 0
+ 1334 0b40 488D7728 		leaq	40(%rdi), %rsi
+ 1335              	.LVL150:
+ 1336 0b44 B9100000 		movl	$16, %ecx
+ 1336      00
+ 1337              	.LVL151:
+ 1338 0b49 4C89C7   		movq	%r8, %rdi
+ 1339              	.LVL152:
+ 1340 0b4c F3A5     		rep movsl
+ 504:targets.c     **** 	*version = ctx->version;
+ 1341              		.loc 1 504 0
+ 1342 0b4e 8B4868   		movl	104(%rax), %ecx
+ 1343 0b51 418909   		movl	%ecx, (%r9)
+GAS LISTING /tmp/ccO1TY4U.s 			page 40
+
+
+ 505:targets.c     **** 	*length = ctx->length;
+ 1344              		.loc 1 505 0
+ 1345 0b54 8B486C   		movl	108(%rax), %ecx
+ 506:targets.c     **** 	return ctx->res;
+ 1346              		.loc 1 506 0
+ 1347 0b57 8B4070   		movl	112(%rax), %eax
+ 1348              	.LVL153:
+ 505:targets.c     **** 	*length = ctx->length;
+ 1349              		.loc 1 505 0
+ 1350 0b5a 890A     		movl	%ecx, (%rdx)
+ 507:targets.c     **** }
+ 1351              		.loc 1 507 0
+ 1352 0b5c C3       		ret
+ 1353              		.cfi_endproc
+ 1354              	.LFE13:
+ 1356              		.local	targets_ctx_busy
+ 1357              		.comm	targets_ctx_busy,1,1
+ 1358              		.local	targets_ctxs
+ 1359              		.comm	targets_ctxs,200,32
+ 1360              		.section	.rodata.str1.1
+ 1361              	.LC1:
+ 1362 0008 7369676E 		.string	"signatures"
+ 1362      61747572 
+ 1362      657300
+ 1363              	.LC2:
+ 1364 0013 6B657969 		.string	"keyid"
+ 1364      6400
+ 1365              	.LC3:
+ 1366 0019 6D657468 		.string	"method"
+ 1366      6F6400
+ 1367              	.LC4:
+ 1368 0020 73696700 		.string	"sig"
+ 1369              	.LC5:
+ 1370 0024 7369676E 		.string	"signed"
+ 1370      656400
+ 1371              	.LC6:
+ 1372 002b 5F747970 		.string	"_type"
+ 1372      6500
+ 1373              	.LC7:
+ 1374 0031 65787069 		.string	"expires"
+ 1374      72657300 
+ 1375              	.LC8:
+ 1376 0039 74617267 		.string	"targets"
+ 1376      65747300 
+ 1377              	.LC9:
+ 1378 0041 63757374 		.string	"custom"
+ 1378      6F6D00
+ 1379              	.LC10:
+ 1380 0048 6563755F 		.string	"ecu_identifier"
+ 1380      6964656E 
+ 1380      74696669 
+ 1380      657200
+ 1381              	.LC11:
+ 1382 0057 68617264 		.string	"hardware_identifier"
+ 1382      77617265 
+ 1382      5F696465 
+ 1382      6E746966 
+GAS LISTING /tmp/ccO1TY4U.s 			page 41
+
+
+ 1382      69657200 
+ 1383              	.LC12:
+ 1384 006b 72656C65 		.string	"release_counter"
+ 1384      6173655F 
+ 1384      636F756E 
+ 1384      74657200 
+ 1385              	.LC13:
+ 1386 007b 68617368 		.string	"hashes"
+ 1386      657300
+ 1387              	.LC14:
+ 1388 0082 73686132 		.string	"sha256"
+ 1388      353600
+ 1389              	.LC15:
+ 1390 0089 73686135 		.string	"sha512"
+ 1390      313200
+ 1391              	.LC16:
+ 1392 0090 6C656E67 		.string	"length"
+ 1392      746800
+ 1393              	.LC17:
+ 1394 0097 76657273 		.string	"version"
+ 1394      696F6E00 
+ 1395              	.LC18:
+ 1396 009f 2A00     		.string	"*"
+ 1397              	.LC19:
+ 1398 00a1 5B00     		.string	"["
+ 1399              		.section	.rodata
+ 1400              		.align 32
+ 1403              	targets_key_strings:
+ 1404 0000 00000000 		.quad	.LC1
+ 1404      00000000 
+ 1405 0008 00000000 		.quad	.LC2
+ 1405      00000000 
+ 1406 0010 00000000 		.quad	.LC3
+ 1406      00000000 
+ 1407 0018 00000000 		.quad	.LC4
+ 1407      00000000 
+ 1408 0020 00000000 		.quad	.LC5
+ 1408      00000000 
+ 1409 0028 00000000 		.quad	.LC6
+ 1409      00000000 
+ 1410 0030 00000000 		.quad	.LC7
+ 1410      00000000 
+ 1411 0038 00000000 		.quad	.LC8
+ 1411      00000000 
+ 1412 0040 00000000 		.quad	.LC9
+ 1412      00000000 
+ 1413 0048 00000000 		.quad	.LC10
+ 1413      00000000 
+ 1414 0050 00000000 		.quad	.LC11
+ 1414      00000000 
+ 1415 0058 00000000 		.quad	.LC12
+ 1415      00000000 
+ 1416 0060 00000000 		.quad	.LC13
+ 1416      00000000 
+ 1417 0068 00000000 		.quad	.LC14
+ 1417      00000000 
+ 1418 0070 00000000 		.quad	.LC15
+GAS LISTING /tmp/ccO1TY4U.s 			page 42
+
+
+ 1418      00000000 
+ 1419 0078 00000000 		.quad	.LC16
+ 1419      00000000 
+ 1420 0080 00000000 		.quad	.LC17
+ 1420      00000000 
+ 1421 0088 00000000 		.quad	.LC18
+ 1421      00000000 
+ 1422 0090 00000000 		.quad	.LC19
+ 1422      00000000 
+ 1423              		.text
+ 1424              	.Letext0:
+ 1425              		.file 2 "<built-in>"
+ 1426              		.file 3 "/usr/lib/gcc/x86_64-pc-linux-gnu/6.3.1/include/stdarg.h"
+ 1427              		.file 4 "/usr/include/stdint.h"
+ 1428              		.file 5 "/usr/lib/gcc/x86_64-pc-linux-gnu/6.3.1/include/stddef.h"
+ 1429              		.file 6 "crypto.h"
+ 1430              		.file 7 "targets.h"
+ 1431              		.file 8 "ed25519/sha512.h"
+ 1432              		.file 9 "gigajson/src/gjson.h"
+ 1433              		.file 10 "/usr/include/string.h"
+GAS LISTING /tmp/ccO1TY4U.s 			page 43
+
+
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 targets.c
+     /tmp/ccO1TY4U.s:5      .text:0000000000000000 path_equal
+     /tmp/ccO1TY4U.s:101    .text:00000000000000b8 targets_json_handler
+     /tmp/ccO1TY4U.s:1403   .rodata:0000000000000000 targets_key_strings
+     /tmp/ccO1TY4U.s:1122   .text:0000000000000a14 targets_ctx_new
+                             .bss:0000000000000000 targets_ctx_busy
+     /tmp/ccO1TY4U.s:1359   .bss:0000000000000020 targets_ctxs
+     /tmp/ccO1TY4U.s:1139   .text:0000000000000a2a targets_ctx_free
+     /tmp/ccO1TY4U.s:1211   .text:0000000000000a81 targets_init
+     /tmp/ccO1TY4U.s:1309   .text:0000000000000b2e targets_process
+     /tmp/ccO1TY4U.s:1324   .text:0000000000000b37 targets_get_result
+
+UNDEFINED SYMBOLS
+crypto_verify_putc
+crypto_verify_ctx_init
+crypto_verify_ctx_new
+crypto_verify_result
+strnlen
+hex
+memcmp
+crypto_keytype_supported
+strcmp
+get_time
+get_num
+gj_ctx_free
+crypto_verify_ctx_free
+new_sig
+gj_ctx_new
+gj_init
+gj_process
