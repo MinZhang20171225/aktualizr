@@ -8,6 +8,8 @@
 #include <openssl/pkcs12.h>
 #include <openssl/rand.h>
 #include <openssl/rsa.h>
+#include <sodium.h>
+#include <boost/algorithm/hex.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
 
@@ -41,6 +43,34 @@ struct PublicKey {
   std::string value;
   Type type;
   int key_length;
+};
+
+class MultiPartSHA512Hasher {
+ public:
+  MultiPartSHA512Hasher() { crypto_hash_sha512_init(&state_); }
+  void update(const unsigned char *part, int64_t size) { crypto_hash_sha512_update(&state_, part, size); }
+  std::string getHexDigest() {
+    std::string sha512_hash(crypto_hash_sha512_BYTES, '\0');
+    crypto_hash_sha512_final(&state_, (unsigned char *)sha512_hash.c_str());
+    return boost::algorithm::hex(sha512_hash);
+  }
+
+ private:
+  crypto_hash_sha512_state state_;
+};
+
+class MultiPartSHA256Hasher {
+ public:
+  MultiPartSHA256Hasher() { crypto_hash_sha256_init(&state_); }
+  void update(const unsigned char *part, int64_t size) { crypto_hash_sha256_update(&state_, part, size); }
+  std::string getHexDigest() {
+    std::string sha256_hash(crypto_hash_sha512_BYTES, '\0');
+    crypto_hash_sha256_final(&state_, (unsigned char *)sha256_hash.c_str());
+    return boost::algorithm::hex(sha256_hash);
+  }
+
+ private:
+  crypto_hash_sha256_state state_;
 };
 
 class Crypto {

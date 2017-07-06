@@ -3,6 +3,7 @@
 
 #include <boost/filesystem.hpp>
 
+#include <sodium.h>
 #include <map>
 #include <string>
 
@@ -15,6 +16,14 @@
 
 namespace Uptane {
 typedef std::map<std::string, unsigned int> RoleThreshold;
+
+struct DownloadMetaStruct {
+  int64_t expected_length;
+  int64_t downloaded_length;
+  FILE *fp;
+  MultiPartSHA256Hasher sha256_hasher;
+  MultiPartSHA512Hasher sha512_hasher;
+};
 
 class TufRepository {
  public:
