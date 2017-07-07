@@ -107,11 +107,15 @@ bool crypto_verify_result(crypto_verify_ctx_t* ctx) {
 					   ctx->pub, ctx->block, ctx->bytes_fed);
 }
 
-bool crypto_keytype_supported(const char* keytype) {
-	int i;
-	for(i = 0; i < sizeof(supported_keytypes)/sizeof(supported_keytypes[0]); i++)
-		if(!strcmp(keytype, supported_keytypes[i]))
-			return true;
+crypto_algorithm_t crypto_string_to_keytype(const char* keytype) {
+	crypto_algorithm_t type = 0;
+	for(type = 0; type < KEY_UNSUPP; type++)
+		if(!strcmp(keytype, supported_keytypes[type]))
+			break;
 
-	return false;
+	return type;
+}
+
+bool crypto_keytype_supported(const char* keytype) {
+	return crypto_string_to_keytype(keytype) != KEY_UNSUPP;
 }

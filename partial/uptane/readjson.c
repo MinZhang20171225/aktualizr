@@ -64,13 +64,19 @@ static bool signatures_init(signatures_ctx_t* ctx, const role_keys_t* keys) {
 	return true;
 }
 
-bool readjson_init(readjson_ctx_t* ctx, const role_keys_t* keys, const read_cb_t* callbacks) {
+bool readjson_init(readjson_ctx_t* ctx, const role_keys_t* keys, const read_cb_t* callbacks, uint8_t* hash) {
 	ctx->callbacks = *callbacks;
+	
+	if(hash) {
+		sha512_init(&ctx->hash_ctx.hash_state);
+		ctx->hash_ctx.hash_i = 0;
+		ctx->hash_ctx.size = 0;
+	}
 
 	return signatures_init(&ctx->sig_ctx, keys);
 }
 
-static void signatures_on_read(signatures_ctx_t* ctx, uint8_t* buf, int len) {
+static void signatures_on_read(signatures_ctx_t* ctx, const uint8_t* buf, int len) {
 	if(ctx->in_signed) {
 		int i;
 		for(i = 0; i < ctx->num_keys; i++)
@@ -79,6 +85,20 @@ static void signatures_on_read(signatures_ctx_t* ctx, uint8_t* buf, int len) {
 	}
 }
 
+/* "hash" should be non-null and point to uint8_t[SHA512_HASH_SIZE] */
+static void hash_on_read(hash_ctx_t* ctx, const uint8_t* buf, int len) {
+	int i;
+
+	for(i = 0; i < len; i++) {
+		++ctx->size;
+		ctx->hash_block[ctx->hash_i++] = buf[i];
+		if(ctx->hash_i == SHA512_BLOCK_SIZE) {
+			ctx->hash_i = 0;
+			sha512_block(&ctx->hash_state, ctx->hash_block);
+		}
+	}
+
+}
 
 #if defined(CONFIG_UPTANE_SINGLETHREADED)
 #define read_verify_wrapper(ctx, buf, len) read_verify_wrapper_s(buf, len)
@@ -90,6 +110,8 @@ static void read_verify_wrapper(readjson_ctx_t* ctx, uint8_t* buf, int len) {
 	ctx->callbacks.read(ctx->callbacks.priv, buf, len);
 
 	signatures_on_read(&ctx->sig_ctx, buf, len);
+	if(ctx->hash_ctx.hash)
+		hash_on_read(&ctx->hash_ctx, buf, len);
 }
 
 #if defined(CONFIG_UPTANE_SINGLETHREADED)
@@ -130,7 +152,6 @@ static uint8_t from_hex(uint8_t hi, uint8_t lo) {
 /* TODO: consider having more return codes to differentiate between read errors
    and malformed JSON*/
 #if defined(CONFIG_UPTANE_SINGLETHREADED)
-#define one_char(ctx, buf) one_char_s(buf)
 void one_char_s(uint8_t* buf) {
 #else
 void one_char(readjson_ctx_t* ctx, uint8_t* buf) {
@@ -139,7 +160,6 @@ void one_char(readjson_ctx_t* ctx, uint8_t* buf) {
 }
 
 #if defined(CONFIG_UPTANE_SINGLETHREADED)
-#define skip_bytes(ctx, buf) skip_bytes_s(buf)
 void skip_bytes_s(int n) {
 #else
 void skip_bytes(readjson_ctx_t* ctx, int n) {
@@ -152,7 +172,6 @@ void skip_bytes(readjson_ctx_t* ctx, int n) {
 
 /* Hex string including quotes*/
 #if defined(CONFIG_UPTANE_SINGLETHREADED)
-#define hex_string(ctx, data, max_len) hex_string_s(data, max_len)
 int hex_string_s(uint8_t* data, int max_len) {
 #else
 int hex_string(readjson_ctx_t* ctx, uint8_t* data, int max_len) {
@@ -187,7 +206,6 @@ int hex_string(readjson_ctx_t* ctx, uint8_t* data, int max_len) {
 
 /* String including quotes*/
 #if defined(CONFIG_UPTANE_SINGLETHREADED)
-#define text_string(ctx, data, max_len) text_string_s(data, max_len)
 bool text_string_s(uint8_t* data, int max_len) {
 #else
 bool text_string(readjson_ctx_t* ctx, uint8_t* data, int max_len) {
@@ -218,7 +236,6 @@ bool text_string(readjson_ctx_t* ctx, uint8_t* data, int max_len) {
 }
 
 #if defined(CONFIG_UPTANE_SINGLETHREADED)
-#define integer_number(ctx, num) integer_number_s(num)
 bool integer_number_s(uint32_t* num) {
 #else
 bool integer_number(readjson_ctx_t* ctx, uint32_t* num) {
@@ -244,7 +261,6 @@ bool integer_number(readjson_ctx_t* ctx, uint32_t* num) {
 
 /* Expected format is yyyy-mm-ddThh:mm:ssZ*/
 #if defined(CONFIG_UPTANE_SINGLETHREADED)
-#define time_string(ctx, time) time_string_s(time)
 bool time_string_s(uptane_time_t* time) {
 #else
 bool time_string(readjson_ctx_t *ctx, uptane_time_t* time) {
@@ -286,7 +302,6 @@ bool time_string(readjson_ctx_t *ctx, uptane_time_t* time) {
 }
 
 #if defined(CONFIG_UPTANE_SINGLETHREADED)
-#define read_signatures(ctx) read_signatures_s()
 bool read_signatures_s() {
 	readjson_ctx_t* ctx = &readjson_ctx_s;
 #else
@@ -359,7 +374,6 @@ bool read_signatures(readjson_ctx_t* ctx) {
 }
 
 #if defined(CONFIG_UPTANE_SINGLETHREADED)
-#define read_verify_signed(ctx) read_verify_signed_s()
 bool read_verify_signed_s() {
 	readjson_ctx_t* ctx = &readjson_ctx_s;
 #else
@@ -373,4 +387,14 @@ bool read_verify_signed(readjson_ctx_t* ctx) {
 			++valid_sigs;
 	return (valid_sigs >= ctx->sig_ctx.threshold);
 
+}
+
+#if defined(CONFIG_UPTANE_SINGLETHREADED)
+void read_hash_finalize_s() {
+	readjson_ctx_t* ctx = &readjson_ctx_s;
+#else
+void read_hash_finalize(readjson_ctx_t* ctx) {
+#endif /*defined(CONFIG_UPTANE_SINGLETHREADED)*/
+	sha512_final(&ctx->hash_ctx.hash_state, ctx->hash_ctx.hash_block, ctx->hash_ctx.size);
+	sha512_get(&ctx->hash_ctx.hash_state, ctx->hash_ctx.hash, 0, SHA512_HASH_SIZE);
 }

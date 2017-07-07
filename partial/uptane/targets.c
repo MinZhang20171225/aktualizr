@@ -84,12 +84,12 @@ bool targets_init(targets_ctx_t* ctx, int version_prev, uptane_time_t time,
 	ctx->read_ctx = readjson_ctx_new();
 	if(!ctx->read_ctx)
 		return false;
-	return readjson_init(ctx->read_ctx, targets_keys, callbacks);
+	return readjson_init(ctx->read_ctx, targets_keys, callbacks, NULL);
 }
 
 
 targets_result_t targets_process(targets_ctx_t* ctx) {
-	uint8_t buf[CONFIG_UPTANE_TARGETS_BUF_SIZE];
+	uint8_t buf[CONFIG_UPTANE_STRING_BUF_SIZE];
 	uptane_time_t time;
 	uint32_t number = 0;
 	bool got_image = false;
@@ -107,7 +107,7 @@ targets_result_t targets_process(targets_ctx_t* ctx) {
 	read_enter_signed(ctx->read_ctx);
 	fixed_data(ctx->read_ctx, "{\"_type\":");
 
-	if(!text_string(ctx->read_ctx, buf, CONFIG_UPTANE_TARGETS_BUF_SIZE))
+	if(!text_string(ctx->read_ctx, buf, CONFIG_UPTANE_STRING_BUF_SIZE))
 		return TARGETS_JSONERR;
 
 	if(strcmp((const char*) buf, "Targets"))
@@ -133,7 +133,7 @@ targets_result_t targets_process(targets_ctx_t* ctx) {
 
 		fixed_data(ctx->read_ctx, ":{\"custom\":{\"ecu_identifier\":");
 
-		if(!text_string(ctx->read_ctx, buf, CONFIG_UPTANE_TARGETS_BUF_SIZE))
+		if(!text_string(ctx->read_ctx, buf, CONFIG_UPTANE_STRING_BUF_SIZE))
 			return TARGETS_JSONERR;
 
 		if(strcmp((const char*) buf, (const char*) ctx->ecu_id))
@@ -141,7 +141,7 @@ targets_result_t targets_process(targets_ctx_t* ctx) {
 
 		fixed_data(ctx->read_ctx, ",\"hardware_identifier\":");
 
-		if(!text_string(ctx->read_ctx, buf, CONFIG_UPTANE_TARGETS_BUF_SIZE))
+		if(!text_string(ctx->read_ctx, buf, CONFIG_UPTANE_STRING_BUF_SIZE))
 			return TARGETS_JSONERR;
 
 		if(strcmp((const char*) buf, (const char*) ctx->hardware_id))
@@ -157,7 +157,7 @@ targets_result_t targets_process(targets_ctx_t* ctx) {
 
 		/* Iterate over hashes */
 		for(;;) {
-			if(!text_string(ctx->read_ctx, buf, CONFIG_UPTANE_TARGETS_BUF_SIZE))
+			if(!text_string(ctx->read_ctx, buf, CONFIG_UPTANE_STRING_BUF_SIZE))
 				return TARGETS_JSONERR;
 			fixed_data(ctx->read_ctx, ":");
 
@@ -167,7 +167,7 @@ targets_result_t targets_process(targets_ctx_t* ctx) {
 					return TARGETS_JSONERR;
 				got_hash = true;
 			} else {
-				if(!ignore_string(ctx))
+				if(!ignore_string(ctx->read_ctx))
 					return TARGETS_JSONERR;
 			}
 
@@ -181,7 +181,7 @@ targets_result_t targets_process(targets_ctx_t* ctx) {
 
 		fixed_data(ctx->read_ctx, ",\"length\":");
 
-		if(!integer_number(ctx, &ctx->length))
+		if(!integer_number(ctx->read_ctx, &ctx->length))
 			return TARGETS_JSONERR;
 
 		if(!ignore_image) {
@@ -202,7 +202,7 @@ targets_result_t targets_process(targets_ctx_t* ctx) {
 
 	fixed_data(ctx->read_ctx, ",\"version\":");
 
-	if(!integer_number(ctx, &ctx->version))
+	if(!integer_number(ctx->read_ctx, &ctx->version))
 		return TARGETS_JSONERR;
 
 	if(ctx->version < ctx->version_prev)

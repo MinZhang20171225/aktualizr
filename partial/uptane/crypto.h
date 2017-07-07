@@ -9,7 +9,7 @@
 #define CRYPTO_KEYVAL_LEN 32	/* public key length, 32 for ed25519 */
 #define CRYPTO_SIGNATURE_LEN 64 /* signature length, 64 for ed25519 */
 
-typedef enum {ED25519} crypto_algorithm_t;
+typedef enum {ED25519=0, KEY_UNSUPP} crypto_algorithm_t;
 typedef struct {
 	crypto_algorithm_t key_type;
 	uint8_t keyid[CRYPTO_KEYID_LEN];
@@ -34,5 +34,6 @@ void crypto_verify_feed(crypto_verify_ctx_t* ctx, const uint8_t* data, int len);
 bool crypto_verify_result(crypto_verify_ctx_t* ctx);
 
 bool crypto_keytype_supported(const char* keytype);
+crypto_algorithm_t crypto_string_to_keytype(const char* keytype);
 
 #endif /*AKTUALIZR_PARTIAL_CRYPTO_H_*/

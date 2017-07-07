@@ -37,12 +37,14 @@ set(C25519_HEADERS ed25519/ed25519.h
 
 set(UPTANE_SOURCES uptane/crypto.c
 	uptane/targets.c
+	uptane/root.c
 	uptane/uptane_time.c
 	uptane/readjson.c
 	)
 
 set(UPTANE_HEADERS uptane/crypto.h
 	uptane/targets.h
+	uptane/root.h
 	uptane/uptane_time.h
 	uptane/readjson.h
 	)
