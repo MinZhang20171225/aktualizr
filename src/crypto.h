@@ -64,7 +64,7 @@ class MultiPartSHA256Hasher {
   MultiPartSHA256Hasher() { crypto_hash_sha256_init(&state_); }
   void update(const unsigned char *part, int64_t size) { crypto_hash_sha256_update(&state_, part, size); }
   std::string getHexDigest() {
-    std::string sha256_hash(crypto_hash_sha512_BYTES, '\0');
+    std::string sha256_hash(crypto_hash_sha256_BYTES, '\0');
     crypto_hash_sha256_final(&state_, (unsigned char *)sha256_hash.c_str());
     return boost::algorithm::hex(sha256_hash);
   }
