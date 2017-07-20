@@ -128,6 +128,11 @@ if(BUILD_OSTREE)
     add_test(NAME test_ostree_invalid
         COMMAND aktualizr --config ${CMAKE_CURRENT_SOURCE_DIR}/missing_ostree_repo.toml)
     set_tests_properties(test_ostree_invalid PROPERTIES PASS_REGULAR_EXPRESSION "Could not load installed ostree package")
+
+    add_test(NAME test_ostree_none
+        COMMAND aktualizr --config ${CMAKE_CURRENT_SOURCE_DIR}/no_ostree_repo.toml)
+    set_tests_properties(test_ostree_invalid PROPERTIES PASS_REGULAR_EXPRESSION "Could not load installed ostree package")
+
 endif(BUILD_OSTREE)
 
 
