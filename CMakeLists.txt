@@ -88,4 +88,8 @@ add_custom_target(tags
     COMMAND ctags -R --c++-kinds=+p --fields=+iaS --extra=+q src
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+set(CPACK_GENERATOR "DEB")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Phil Wise <phil@advancedtelematic.com>") #required
+include(CPack)
+
 # vim: set tabstop=4 shiftwidth=4 expandtab:
