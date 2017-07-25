@@ -1,3 +1,6 @@
+/**
+ * \file
+ */
 #include <gtest/gtest.h>
 #include <boost/program_options.hpp>
 #include <iostream>
@@ -109,6 +112,9 @@ TEST(config, config_toml_parsing_empty_file) {
   EXPECT_EQ(conf.gateway.rvi, false);
 }
 
+/**
+ * \verify{\req{001}}
+ */
 TEST(config, config_cmdl_parsing) {
   int argc = 7;
   const char *argv[] = {"./aktualizr", "--gateway-http", "off", "--gateway-rvi", "on", "--gateway-socket", "on"};

@@ -87,12 +87,6 @@ class Hash {
   Hash(const std::string &type, const std::string &hash);
   Hash(Type type, const std::string &hash);
 
-  /**
-   * Hash content and check it
-   * @param content
-   * @return
-   */
-
   bool HaveAlgorithm() const { return type_ != kUnknownAlgorithm; }
   bool operator==(const Hash &other) const;
   friend std::ostream &operator<<(std::ostream &os, const Hash &h);
@@ -146,6 +140,10 @@ class Root {
   enum Policy { kRejectAll, kAcceptAll, kCheck };
   /**
    * An empty Root, that either accepts or rejects everything
+   *
+   * @satisfy{\req{1113}} - A short description in the code
+   * @satisfy{\req{1114}} - Another description
+   *
    */
   Root(Policy policy) : policy_(policy) {}
   /**

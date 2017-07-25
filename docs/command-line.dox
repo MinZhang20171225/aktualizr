@@ -1,0 +1,12 @@
+/*!
+
+\page command-line Commmand Line Arguments
+
+\aktualizr accepts the following command line arguments
+
+<b>--help</b> Display a help message \req{001}
+
+<b>--version</b> Display the version number of Aktualizr.
+This is injected using the AKTUALIZR_VERSION cmake option, and ultimately comes from the aktualizr Yocto recipe. \req{002}
+
+*/

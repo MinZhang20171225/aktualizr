@@ -84,6 +84,11 @@ TEST(Utils, Base64RoundTrip) {
   }
 }
 
+/**
+ * Test of a requirement
+ *
+ * @verify{\req{1113}} - A short description in the code
+ */
 TEST(Utils, TemporaryFile) {
   boost::filesystem::path p;
   {

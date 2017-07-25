@@ -89,6 +89,10 @@ Config::Config(const boost::property_tree::ptree& pt) {
   postUpdateValues();
 }
 
+/**
+ *
+ * \satisfy{\req{1413}} Autoprovisioning
+ */
 void Config::postUpdateValues() {
   boost::system::error_code error;
   boost::filesystem::create_directories(device.certificates_directory, error);

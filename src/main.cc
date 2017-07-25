@@ -1,24 +1,7 @@
-/*!
- * \cond FILEINFO
- ******************************************************************************
- * \file main.cpp
- ******************************************************************************
- *
- * Copyright (C) ATS Advanced Telematic Systems GmbH GmbH, 2016
- *
- * \author Moritz Klinger
- *
- ******************************************************************************
- *
- * \brief  The main file of the project.
- *
- *
- ******************************************************************************
- *
- * \endcond
+/**
+ * \file
  */
 
-/*****************************************************************************/
 #include <boost/program_options.hpp>
 #include <boost/property_tree/ini_parser.hpp>
 #include <iostream>
@@ -28,10 +11,18 @@
 #include "logger.h"
 #include "utils.h"
 
-/*****************************************************************************/
 
 namespace bpo = boost::program_options;
 
+/**
+ * Parse command line options
+ *
+ * \satisfy{\req{001}} Help
+ * \satisfy{\req{002}} Version number
+ * @param argc
+ * @param argv
+ * @return
+ */
 bpo::variables_map parse_options(int argc, char *argv[]) {
   bpo::options_description description("CommandLine Options");
   // clang-format off

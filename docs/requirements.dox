@@ -1,0 +1,32 @@
+/*!
+
+\page requirements Requirements
+
+
+\anchor PRO-001
+# PRO-001 Command line help
+
+There is a --help option on the aktualizr executable that generates a help message, performs no operation and returns 0 (EXIT_SUCCESS).
+
+\anchor PRO-002
+# PRO-002 Version number information
+
+There is a way to discover the version number of a built version of \aktualizr
+
+\anchor PRO-1413
+# PRO-004 Automatic provisioning
+
+Automatic provisioning \jira{PRO-1413} allows a device to automatically add itself to a users account.
+It uses a set of bootstrap credentials that are manually downloaded from the server and included in the build.
+These are passed to \aktualizr via the \b provision_path configuration option.
+
+@anchor PRO-1113
+# PRO-1113 An important requirement
+
+The is a requirement
+
+@anchor PRO-1114
+# PRO-1114 A second requirement
+
+
+*/
