@@ -150,9 +150,9 @@ TEST(uptane, sign) {
 }
 
 /*
- * \verify{\tst{153}} Check that aktualizr creates provisioning files if they
- * don't exist already.
- */
+* \verify{\tst{153}} Check that aktualizr creates provisioning files if they
+* don't exist already.
+*/
 TEST(SotaUptaneClientTest, initialize) {
   Config conf("tests/config_tests_prov.toml");
   conf.uptane.metadata_path = "tests/";
@@ -196,9 +196,9 @@ TEST(SotaUptaneClientTest, initialize) {
 }
 
 /*
- * \verify{\tst{154}} Check that aktualizr does NOT change provisioning files if
- * they DO exist already.
- */
+* \verify{\tst{154}} Check that aktualizr does NOT change provisioning files if
+* they DO exist already.
+*/
 TEST(SotaUptaneClientTest, initialize_twice) {
   Config conf("tests/config_tests_prov.toml");
   conf.tls.certificates_directory = uptane_test_dir + "/certs";
@@ -252,9 +252,9 @@ TEST(SotaUptaneClientTest, initialize_twice) {
 }
 
 /**
- * \verify{\tst{155}} Check that aktualizr generates random ecu_serial for
- * primary and all secondaries.
- */
+* \verify{\tst{155}} Check that aktualizr generates random ecu_serial for
+* primary and all secondaries.
+*/
 TEST(uptane, random_serial) {
   Config conf_1("tests/config_tests_prov.toml");
   conf_1.tls.certificates_directory = uptane_test_dir + "/certs_1";
@@ -306,10 +306,10 @@ TEST(uptane, random_serial) {
 }
 
 /**
- * \verify{\tst{146}} Check that aktualizr does not generate a pet name when
- * device ID is specified. This is currently provisional and not a finalized
- * requirement at this time.
- */
+* \verify{\tst{146}} Check that aktualizr does not generate a pet name when
+* device ID is specified. This is currently provisional and not a finalized
+* requirement at this time.
+*/
 TEST(uptane, pet_name_provided) {
   std::string test_name = "test-name-123";
   std::string device_path = uptane_test_dir + "/device_id";
@@ -340,9 +340,9 @@ TEST(uptane, pet_name_provided) {
 }
 
 /**
- * \verify{\tst{145}} Check that aktualizr generates a pet name if no device ID
- * is specified.
- */
+* \verify{\tst{145}} Check that aktualizr generates a pet name if no device ID
+* is specified.
+*/
 TEST(uptane, pet_name_creation) {
   std::string device_path = uptane_test_dir + "/device_id";
 
@@ -420,8 +420,8 @@ TEST(uptane, pet_name_creation) {
 }
 
 /**
- * \verify{\tst{49}} Check that aktualizr fails on expired methadata
- */
+* \verify{\tst{49}} Check that aktualizr fails on expired methadata
+*/
 TEST(uptane, expires) {
   Config config;
   config.uptane.metadata_path = uptane_test_dir;
@@ -458,8 +458,8 @@ TEST(uptane, expires) {
 }
 
 /**
- * \verify{\tst{52}} Check that aktualizr fails on bad threshold
- */
+* \verify{\tst{52}} Check that aktualizr fails on bad threshold
+*/
 TEST(uptane, threshold) {
   Config config;
   config.uptane.metadata_path = uptane_test_dir;
@@ -527,10 +527,12 @@ TEST(SotaUptaneClientTest, initialize_fail) {
 }
 
 TEST(SotaUptaneClientTest, putmanifest) {
-  Config config;
+  Config config("tests/config_tests_prov.toml");
+  Utils::copyDir("tests/test_data", uptane_test_dir);
   config.uptane.metadata_path = uptane_test_dir;
   config.uptane.repo_server = tls_server + "/director";
   config.tls.certificates_directory = uptane_test_dir;
+  boost::filesystem::remove_all(uptane_test_dir);
   boost::filesystem::create_directory(uptane_test_dir);
   boost::filesystem::copy_file("tests/test_data/cred.zip", uptane_test_dir + "/cred.zip");
   config.provision.provision_path = uptane_test_dir + "/cred.zip";
@@ -549,7 +551,9 @@ TEST(SotaUptaneClientTest, putmanifest) {
   config.uptane.secondaries.push_back(ecu_config);
 
   FSStorage storage(config);
+  storage.clearPrimaryKeys();
   HttpFake http(uptane_test_dir);
+
   Uptane::Repository uptane(config, storage, http);
   uptane.initialize();
 
@@ -564,10 +568,11 @@ TEST(SotaUptaneClientTest, putmanifest) {
 
   EXPECT_EQ(json["signatures"].size(), 1u);
   EXPECT_EQ(json["signed"]["primary_ecu_serial"].asString(), "testecuserial");
-  EXPECT_EQ(json["signed"]["ecu_version_manifest"].size(), 2u);
-  EXPECT_EQ(json["signed"]["ecu_version_manifest"][0]["signed"]["ecu_serial"], "secondary_ecu_serial");
-  EXPECT_EQ(json["signed"]["ecu_version_manifest"][0]["signed"]["installed_image"]["filepath"], "/tmp/firmware.txt");
-
+  EXPECT_EQ(json["signed"]["ecu_version_manifests"].size(), 2u);
+  EXPECT_EQ(json["signed"]["ecu_version_manifests"]["secondary_ecu_serial"]["signed"]["ecu_serial"],
+            "secondary_ecu_serial");
+  EXPECT_EQ(json["signed"]["ecu_version_manifests"]["secondary_ecu_serial"]["signed"]["installed_image"]["filepath"],
+            "/tmp/firmware.txt");
   boost::filesystem::remove_all(uptane_test_dir);
 }
 
@@ -705,7 +710,7 @@ TEST(SotaUptaneClientTest, RunForeverInstall) {
   reader.parse(mnfst_str, json);
   EXPECT_EQ(json["signatures"].size(), 1u);
   EXPECT_EQ(json["signed"]["primary_ecu_serial"].asString(), "testecuserial");
-  EXPECT_EQ(json["signed"]["ecu_version_manifest"].size(), 1u);
+  EXPECT_EQ(json["signed"]["ecu_version_manifests"].size(), 1u);
 
   boost::filesystem::remove_all(uptane_test_dir);
 }

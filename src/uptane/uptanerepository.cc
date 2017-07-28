@@ -25,7 +25,7 @@ Repository::Repository(const Config &config_in, INvStorage &storage_in, HttpInte
       image("repo", config.uptane.repo_server, config, storage_in, http_client),
       storage(storage_in),
       http(http_client),
-      manifests(Json::arrayValue),
+      manifests(),
       transport(&secondaries) {}
 
 void Repository::updateRoot(Version version) {
@@ -36,14 +36,14 @@ void Repository::updateRoot(Version version) {
 Json::Value Repository::getCurrentVersionManifests(const Json::Value &primary_version_manifest) {
   Json::Value ecu_version_signed = Crypto::signTuf(primary_private_key, primary_public_key, primary_version_manifest);
   Json::Value manifests = transport.getManifests();
-  manifests.append(ecu_version_signed);
+  manifests[primary_ecu_serial] = ecu_version_signed;
   return manifests;
 }
 
 bool Repository::putManifest(const Json::Value &version_manifests) {
   Json::Value manifest;
   manifest["primary_ecu_serial"] = primary_ecu_serial;
-  manifest["ecu_version_manifest"] = version_manifests;
+  manifest["ecu_version_manifests"] = version_manifests;
   Json::Value tuf_signed = Crypto::signTuf(primary_private_key, primary_public_key, manifest);
   HttpResponse response = http.put(config.uptane.director_server + "/manifest", tuf_signed);
   return response.isOk();

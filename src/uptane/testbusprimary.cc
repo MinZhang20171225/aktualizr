@@ -4,10 +4,11 @@ namespace Uptane {
 TestBusPrimary::TestBusPrimary(std::vector<Secondary> *secondaries) : secondaries_(secondaries) {}
 
 Json::Value TestBusPrimary::getManifests() {
-  Json::Value manifests(Json::arrayValue);
+  Json::Value manifests;
   std::vector<Secondary>::iterator it;
   for (it = secondaries_->begin(); it != secondaries_->end(); ++it) {
-    manifests.append((*it).genAndSendManifest());
+    Json::Value manifest = (*it).genAndSendManifest();
+    manifests[manifest["signed"]["ecu_serial"].asString()] = manifest;
   }
   return manifests;
 }
