@@ -96,26 +96,22 @@ HttpResponse HttpClient::get(const std::string& url) {
 }
 
 void HttpClient::setCerts(const std::string& ca, const std::string& cert, const std::string& pkey) {
-  TemporaryFile* ca_tf = tls_ca_file.release();
-  TemporaryFile* cert_tf = tls_cert_file.release();
-  TemporaryFile* pkey_tf = tls_pkey_file.release();
 
-  tls_ca_file = boost::movelib::make_unique<TemporaryFile>(TemporaryFile("tls-ca"));
-  tls_cert_file = boost::movelib::make_unique<TemporaryFile>(TemporaryFile("tls-cert"));
-  tls_pkey_file = boost::movelib::make_unique<TemporaryFile>(TemporaryFile("tls-pkey"));
 
-  Utils::writeFile(tls_ca_file->Path().native(), ca);
-  Utils::writeFile(tls_cert_file->Path().native(), cert);
-  Utils::writeFile(tls_pkey_file->Path().native(), pkey);
+  tls_ca_file = boost::movelib::make_unique<TemporaryFile>("tls-ca");
+  tls_cert_file = boost::movelib::make_unique<TemporaryFile>("tls-cert");
+  tls_pkey_file = boost::movelib::make_unique<TemporaryFile>("tls-pkey");
+
+  tls_ca_file->PutContents(ca);
+  tls_cert_file->PutContents(cert);
+  tls_pkey_file->PutContents(pkey);
 
   curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, true);
   curl_easy_setopt(curl, CURLOPT_CAINFO, tls_ca_file->Path().c_str());
   curl_easy_setopt(curl, CURLOPT_SSLCERT, tls_cert_file->Path().c_str());
   curl_easy_setopt(curl, CURLOPT_SSLKEY, tls_pkey_file->Path().c_str());
 
-  if (ca_tf) delete ca_tf;
-  if (cert_tf) delete cert_tf;
-  if (pkey_tf) delete pkey_tf;
+
 }
 
 HttpResponse HttpClient::post(const std::string& url, const Json::Value& data) {
