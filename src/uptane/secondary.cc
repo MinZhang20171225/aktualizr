@@ -8,7 +8,10 @@
 namespace Uptane {
 Secondary::Secondary(const SecondaryConfig &config_in, Uptane::Repository *primary)
     : config(config_in), transport(primary) {
-  boost::filesystem::create_directories(config.firmware_path.parent_path());
+  const boost::filesystem::path firmware_directory = config.firmware_path.parent_path();
+  if (firmware_directory.size() > 0) {
+    boost::filesystem::create_directories(firmware_directory);
+  }
 }
 
 Json::Value Secondary::genAndSendManifest(Json::Value custom) {
