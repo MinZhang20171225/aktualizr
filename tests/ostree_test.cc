@@ -9,8 +9,7 @@
 #include "ostree.h"
 #include "utils.h"
 TEST(ostree, constructor) {
-  OstreePackage op("ecu_serial", "branch-name-hash", "branch-name", "hash", "description", "pull_uri");
-  EXPECT_EQ(op.ecu_serial, "ecu_serial");
+  OstreePackage op("branch-name-hash", "hash", "description", "pull_uri");
   EXPECT_EQ(op.ref_name, "branch-name-hash");
   EXPECT_EQ(op.branch_name, "branch-name");
   EXPECT_EQ(op.refhash, "hash");
@@ -19,10 +18,10 @@ TEST(ostree, constructor) {
 }
 
 TEST(ostree, toEcuVersion) {
-  OstreePackage op("ecu_serial", "branch-name-hash", "branch-name", "hash", "description", "pull_uri");
+  OstreePackage op("branch-name-hash", "hash", "description", "pull_uri");
   Json::Value custom;
   custom["key"] = "value";
-  Json::Value ecuver = op.toEcuVersion(custom);
+  Json::Value ecuver = op.toEcuVersion("ecu_serial", custom);
   EXPECT_EQ(ecuver["custom"]["key"], "value");
   EXPECT_EQ(ecuver["ecu_serial"], "ecu_serial");
   EXPECT_EQ(ecuver["installed_image"]["fileinfo"]["hashes"]["sha256"], "hash");

@@ -88,15 +88,15 @@ bool Ostree::addRemote(OstreeRepo *repo, const std::string &remote, const std::s
 
 #include "ostree-1/ostree.h"
 
-OstreePackage::OstreePackage(const std::string &ecu_serial_in, const std::string &ref_name_in,
-                             const std::string &branch_name_in, const std::string &refhash_in,
-                             const std::string &desc_in, const std::string &treehub_in)
-    : ecu_serial(ecu_serial_in),
-      ref_name(ref_name_in),
-      branch_name(branch_name_in),
-      refhash(refhash_in),
-      description(desc_in),
-      pull_uri(treehub_in) {}
+OstreePackage::OstreePackage(const std::string &ref_name_in, const std::string &refhash_in, const std::string &desc_in,
+                             const std::string &treehub_in)
+    : ref_name(ref_name_in), refhash(refhash_in), description(desc_in), pull_uri(treehub_in) {
+  std::size_t pos = ref_name.find_last_of("-");
+  if (pos == std::string::npos) throw std::runtime_error("Invalid refname");
+
+  branch_name = ref_name.substr(0, pos);
+  if (branch_name.empty()) throw std::runtime_error("Invalid refname");
+}
 
 data::InstallOutcome OstreePackage::install(const data::PackageManagerCredentials &cred, OstreeConfig config) const {
   const char remote[] = "aktualizr-remote";
@@ -196,21 +196,12 @@ data::InstallOutcome OstreePackage::install(const data::PackageManagerCredential
   return data::InstallOutcome(data::OK, "Installation successful");
 }
 
-OstreeBranch OstreeBranch::getCurrent(const std::string &ecu_serial, const std::string &ostree_sysroot) {
+std::string OstreePackage::getCurrent(const std::string &ostree_sysroot) {
   boost::shared_ptr<OstreeDeployment> staged_deployment = Ostree::getStagedDeployment(ostree_sysroot);
-
-  GKeyFile *origin = ostree_deployment_get_origin(staged_deployment.get());
-  const char *ref = ostree_deployment_get_csum(staged_deployment.get());
-  char *origin_refspec = g_key_file_get_string(origin, "origin", "refspec", NULL);
-
-  // TODO: get rid of refname, it's uptane responsibility
-  std::string refname = std::string(origin_refspec) + "-" + ref;
-  OstreePackage package(ecu_serial, refname, std::string(origin_refspec), ref, origin_refspec, "");
-  g_free(origin_refspec);
-  return OstreeBranch(true, ostree_deployment_get_osname(staged_deployment.get()), package);
+  return ostree_deployment_get_csum(staged_deployment.get());
 }
 
-Json::Value OstreePackage::toEcuVersion(const Json::Value &custom) const {
+Json::Value OstreePackage::toEcuVersion(const std::string &ecu_serial, const Json::Value &custom) const {
   Json::Value installed_image;
   installed_image["filepath"] = ref_name;
   installed_image["fileinfo"]["length"] = 0;
@@ -226,10 +217,6 @@ Json::Value OstreePackage::toEcuVersion(const Json::Value &custom) const {
     value["custom"] = custom;
   }
   return value;
-}
-
-OstreePackage OstreePackage::getEcu(const std::string &ecu_serial, const std::string &ostree_sysroot) {
-  return OstreeBranch::getCurrent(ecu_serial, ostree_sysroot).package;
 }
 
 Json::Value Ostree::getInstalledPackages(const std::string &file_path) {
