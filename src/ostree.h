@@ -24,7 +24,7 @@ class OstreePackage {
   std::string ref_name;
   std::string branch_name;
   std::string refhash;
-  std::string description;
+  // std::string description;
   std::string pull_uri;
   data::InstallOutcome install(const data::PackageManagerCredentials &cred, OstreeConfig config) const;
 

@@ -90,12 +90,15 @@ bool Ostree::addRemote(OstreeRepo *repo, const std::string &remote, const std::s
 
 OstreePackage::OstreePackage(const std::string &ref_name_in, const std::string &refhash_in, const std::string &desc_in,
                              const std::string &treehub_in)
-    : ref_name(ref_name_in), refhash(refhash_in), description(desc_in), pull_uri(treehub_in) {
+    : ref_name(ref_name_in), refhash(refhash_in),
+      // description(desc_in),
+    pull_uri(treehub_in) {
   std::size_t pos = ref_name.find_last_of("-");
   if (pos == std::string::npos) throw std::runtime_error("Invalid refname");
 
   branch_name = ref_name.substr(0, pos);
   if (branch_name.empty()) throw std::runtime_error("Invalid refname");
+  (void)desc_in;
 }
 
 data::InstallOutcome OstreePackage::install(const data::PackageManagerCredentials &cred, OstreeConfig config) const {

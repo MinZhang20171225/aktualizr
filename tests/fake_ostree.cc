@@ -2,7 +2,9 @@
 
 OstreePackage::OstreePackage(const std::string &ref_name_in, const std::string &refhash_in, const std::string &desc_in,
                              const std::string &treehub_in)
-    : ref_name(ref_name_in), refhash(refhash_in), description(desc_in), pull_uri(treehub_in) {
+    : ref_name(ref_name_in), refhash(refhash_in),
+      // description(desc_in),
+    pull_uri(treehub_in) {
   std::size_t pos = ref_name.find_last_of("-");
   if (pos == std::string::npos) throw std::runtime_error("Invalid refname");
 
