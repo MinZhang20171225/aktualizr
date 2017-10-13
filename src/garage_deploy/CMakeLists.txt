@@ -8,11 +8,6 @@ find_package(Boost COMPONENTS program_options)
 add_executable(garage-deploy ${GARAGE_DEPLOY_SRCS})
 target_link_libraries(garage-deploy ${Boost_LIBRARIES})
 
-if(GARAGE_DEPLOY_VERSION)
-    add_definitions(-DGARAGE_DEPLOY_VERSION="${GARAGE_DEPLOY_VERSION}")
-else(GARAGE_DEPLOY_VERSION)
-    add_definitions(-DGARAGE_DEPLOY_VERSION="dev")
-endif(GARAGE_DEPLOY_VERSION)
 
 aktualizr_source_file_checks(${GARAGE_DEPLOY_SRCS})
 

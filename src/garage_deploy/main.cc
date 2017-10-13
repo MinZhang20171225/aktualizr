@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
       return EXIT_SUCCESS;
     }
     if (vm.count("version") != 0) {
-      std::cout << "Current garage-deploy version is: " << GARAGE_DEPLOY_VERSION << "\n";
+      std::cout << "Current garage-deploy version is: " << AKTUALIZR_VERSION << "\n";
       exit(EXIT_SUCCESS);
     }
     po::notify(vm);

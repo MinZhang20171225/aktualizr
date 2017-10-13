@@ -9,16 +9,14 @@ option(BUILD_GENIVI "Set to ON to compile with SWM and RVI gateway support" OFF)
 option(BUILD_OSTREE "Set to ON to compile with ostree and Uptane support" OFF)
 option(BUILD_SOTA_TOOLS "Set to ON to build SOTA tools" OFF)
 option(INSTALL_LIB "Set to ON to install library and headers" OFF)
+set(AKTUALIZR_VERSION "dev" CACHE STRING "Set Aktualizr version number")
 
 if("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")
     message(FATAL_ERROR "Aktualizr does not support building in the source tree. Please remove CMakeCache.txt and the CMakeFiles/ directory, then create a subdirectory to build in: mkdir build; cd build; cmake ..")
 endif()
 
-if(AKTUALIZR_VERSION)
-    add_definitions(-DAKTUALIZR_VERSION="${AKTUALIZR_VERSION}")
-else(AKTUALIZR_VERSION)
-    add_definitions(-DAKTUALIZR_VERSION="dev")
-endif(AKTUALIZR_VERSION)
+add_definitions(-DAKTUALIZR_VERSION="${AKTUALIZR_VERSION}")
+
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake-modules)
 
