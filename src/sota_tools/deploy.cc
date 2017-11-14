@@ -20,6 +20,13 @@ int present_already = 0;
 int uploaded = 0;
 int errors = 0;
 
+void queried_ev_once(RequestPool &p, OSTreeObject::ptr h) {
+  (void)p;
+  (void)h;
+  // abort as soon as response is received
+  p.Abort();
+}
+
 void queried_ev(RequestPool &p, OSTreeObject::ptr h) {
   switch (h->is_on_server()) {
     case OBJECT_MISSING:
@@ -67,7 +74,7 @@ void uploaded_ev(RequestPool &p, OSTreeObject::ptr h) {
 }
 
 bool copy_repo(const std::string &cacerts, const std::string &src, const std::string &dst, const std::string &ref,
-               bool dryrun) {
+               bool dryrun, bool query_only) {
   TreehubServer push_server;
   TreehubServer fetch_server;
 
@@ -128,8 +135,12 @@ bool copy_repo(const std::string &cacerts, const std::string &src, const std::st
   request_pool.AddQuery(root_object);
 
   // Set callbacks
-  request_pool.OnQuery(queried_ev);
-  request_pool.OnUpload(uploaded_ev);
+  if (query_only) {
+    request_pool.OnQuery(queried_ev_once);
+  } else {
+    request_pool.OnQuery(queried_ev);
+    request_pool.OnUpload(uploaded_ev);
+  }
 
   // Main curl event loop.
   // request_pool takes care of holding number of outstanding requests below
@@ -140,6 +151,19 @@ bool copy_repo(const std::string &cacerts, const std::string &src, const std::st
   do {
     request_pool.Loop();
   } while (root_object->is_on_server() != OBJECT_PRESENT && !request_pool.is_stopped());
+
+  if (query_only) {
+    if (root_object->is_on_server() == OBJECT_PRESENT) {
+      LOG_INFO << "PRESENT: " << root_hash;
+      return EXIT_SUCCESS;
+    } else if (root_object->is_on_server() == OBJECT_MISSING) {
+      LOG_INFO << "MISSING: " << root_hash;
+      return EXIT_FAILURE;
+    } else {
+      LOG_INFO << "ERROR: " << root_hash;
+      return EXIT_FAILURE;
+    }
+  }
 
   LOG_INFO << "Uploaded " << uploaded << " objects";
   LOG_INFO << "Already present " << present_already << " objects";

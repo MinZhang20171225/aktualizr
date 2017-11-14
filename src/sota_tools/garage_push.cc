@@ -25,6 +25,7 @@ int main(int argc, char **argv) {
 
   int verbosity;
   bool dry_run = false;
+  bool query_only = false;
   po::options_description desc("Allowed options");
   // clang-format off
   desc.add_options()
@@ -37,7 +38,8 @@ int main(int argc, char **argv) {
     ("credentials,j", po::value<string>(&credentials_path)->default_value(home_path + "/.sota_tools.json"), "Credentials (json or zip containing json)")
     ("cacert", po::value<string>(&cacerts), "Override path to CA root certificates, in the same format as curl --cacert")
     ("jobs", po::value<int>(&maxCurlRequests)->default_value(30), "Maximum number of parallel requests")
-    ("dry-run,n", "Dry Run: Check arguments and authenticate but don't upload");
+    ("dry-run,n", "Dry Run: Check arguments and authenticate but don't upload")
+    ("query-only,c", "Check the presense of a commit on the server. Returns success if present, error if missing or an error occured.");
   // clang-format on
 
   po::variables_map vm;
@@ -96,10 +98,14 @@ int main(int argc, char **argv) {
     dry_run = true;
   }
 
+  if (vm.count("query-only")) {
+    query_only = true;
+  }
+
   std::string src = repo_path;
   if (!pull_cred.empty()) {
     src = pull_cred;
   }
-  return copy_repo(cacerts, src, credentials_path, ref, dry_run);
+  return copy_repo(cacerts, src, credentials_path, ref, dry_run, query_only);
 }
 // vim: set tabstop=2 shiftwidth=2 expandtab:
