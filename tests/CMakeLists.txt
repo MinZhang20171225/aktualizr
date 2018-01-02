@@ -48,7 +48,7 @@ add_custom_target(check-full COMMAND CTEST_OUTPUT_ON_FAILURE=1 ${CMAKE_CTEST_COM
 # List of source files to run clang-format and clang-check on. Automatically
 # appended to by add_aktualizr_test, but anything that doesn't use that must be
 # manually added to this list.
-set(TEST_SOURCES httpfake.h test_utils.cc test_utils.h)
+set(TEST_SOURCES httpfake.h ostreefake.h test_utils.cc test_utils.h)
 
 
 include(CMakeParseArguments)

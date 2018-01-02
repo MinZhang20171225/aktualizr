@@ -1,16 +1,18 @@
 #include "ostree.h"
-#include <json/json.h>
+
 #include <stdio.h>
 #include <unistd.h>
+#include <fstream>
+
+#include <gio/gio.h>
+#include <json/json.h>
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/filesystem.hpp>
-#include <fstream>
+
 #include "logging.h"
 #include "utils.h"
-
-#include <gio/gio.h>
 
 boost::shared_ptr<OstreeSysroot> Ostree::LoadSysroot(const boost::filesystem::path &path) {
   OstreeSysroot *sysroot = NULL;
@@ -86,11 +88,30 @@ bool Ostree::addRemote(OstreeRepo *repo, const std::string &remote, const std::s
   return true;
 }
 
-#include "ostree-1/ostree.h"
+Json::Value Ostree::getInstalledPackages(const boost::filesystem::path &file_path) {
+  std::string packages_str = Utils::readFile(file_path);
+  std::vector<std::string> package_lines;
+  boost::split(package_lines, packages_str, boost::is_any_of("\n"));
+  Json::Value packages(Json::arrayValue);
+  for (std::vector<std::string>::iterator it = package_lines.begin(); it != package_lines.end(); ++it) {
+    if (it->empty()) {
+      continue;
+    }
+    size_t pos = it->find(" ");
+    if (pos == std::string::npos) {
+      throw std::runtime_error("Wrong packages file format");
+    }
+    Json::Value package;
+    package["name"] = it->substr(0, pos);
+    package["version"] = it->substr(pos + 1);
+    packages.append(package);
+  }
+  return packages;
+}
 
 OstreePackage::OstreePackage(const std::string &ref_name_in, const std::string &refhash_in,
                              const std::string &treehub_in)
-    : ref_name(ref_name_in), refhash(refhash_in), pull_uri(treehub_in) {}
+    : OstreePackageInterface(ref_name_in, refhash_in, treehub_in) {}
 
 data::InstallOutcome OstreePackage::install(const data::PackageManagerCredentials &cred, OstreeConfig config) const {
   const char remote[] = "aktualizr-remote";
@@ -187,11 +208,6 @@ data::InstallOutcome OstreePackage::install(const data::PackageManagerCredential
   return data::InstallOutcome(data::OK, "Installation successful");
 }
 
-std::string OstreePackage::getCurrent(const boost::filesystem::path &ostree_sysroot) {
-  boost::shared_ptr<OstreeDeployment> staged_deployment = Ostree::getStagedDeployment(ostree_sysroot);
-  return ostree_deployment_get_csum(staged_deployment.get());
-}
-
 Json::Value OstreePackage::toEcuVersion(const std::string &ecu_serial, const Json::Value &custom) const {
   Json::Value installed_image;
   installed_image["filepath"] = ref_name;
@@ -210,23 +226,8 @@ Json::Value OstreePackage::toEcuVersion(const std::string &ecu_serial, const Jso
   return value;
 }
 
-Json::Value Ostree::getInstalledPackages(const boost::filesystem::path &file_path) {
-  std::string packages_str = Utils::readFile(file_path);
-  std::vector<std::string> package_lines;
-  boost::split(package_lines, packages_str, boost::is_any_of("\n"));
-  Json::Value packages(Json::arrayValue);
-  for (std::vector<std::string>::iterator it = package_lines.begin(); it != package_lines.end(); ++it) {
-    if (it->empty()) {
-      continue;
-    }
-    size_t pos = it->find(" ");
-    if (pos == std::string::npos) {
-      throw std::runtime_error("Wrong packages file format");
-    }
-    Json::Value package;
-    package["name"] = it->substr(0, pos);
-    package["version"] = it->substr(pos + 1);
-    packages.append(package);
-  }
-  return packages;
+std::string OstreePackage::getCurrent(const boost::filesystem::path &ostree_sysroot) {
+  boost::shared_ptr<OstreeDeployment> staged_deployment = Ostree::getStagedDeployment(ostree_sysroot);
+  return ostree_deployment_get_csum(staged_deployment.get());
 }
+
