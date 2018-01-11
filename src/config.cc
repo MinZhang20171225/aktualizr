@@ -351,6 +351,9 @@ void Config::updateFromCommandLine(const boost::program_options::variables_map& 
 
   if (cmd.count("legacy-interface") != 0) {
     boost::filesystem::path legacy_interface = cmd["legacy-interface"].as<boost::filesystem::path>();
+    if (!boost::filesystem::exists(legacy_interface)) {
+      throw std::runtime_error(std::string("legacy-interface ") + legacy_interface.string() + " is not exists!!!");
+    }
     if (checkLegacyVersion(legacy_interface)) {
       initLegacySecondaries(legacy_interface);
     }
@@ -360,6 +363,9 @@ void Config::updateFromCommandLine(const boost::program_options::variables_map& 
 void Config::readSecondaryConfigs(const std::vector<boost::filesystem::path>& sconfigs) {
   std::vector<boost::filesystem::path>::const_iterator it;
   for (it = sconfigs.begin(); it != sconfigs.end(); ++it) {
+    if (!boost::filesystem::exists(*it)) {
+      throw std::runtime_error(it->string() + " is not exists!!!");
+    }
     Json::Value config_json = Utils::parseJSONFile(*it);
     Uptane::SecondaryConfig sconfig;
 
